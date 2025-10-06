@@ -4,6 +4,10 @@ import json
 from flask import Flask, request, jsonify
 from google.cloud import firestore
 import google.generativeai as genai
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --- Initialization ---
 
