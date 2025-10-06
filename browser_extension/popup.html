@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>reddit-v2</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            width: 350px;
+            padding: 10px;
+        }
+        textarea {
+            width: 95%;
+            min-height: 60px;
+            margin-bottom: 10px;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #statusLog {
+            margin-top: 10px;
+            padding: 5px;
+            border: 1px solid #ccc;
+            height: 100px;
+            overflow-y: scroll;
+            font-size: 12px;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h3>reddit-v2 Agent</h3>
+    
+    <label for="prompt">Prompt:</label>
+    <textarea id="prompt" placeholder="e.g., Write a friendly and encouraging message..."></textarea>
+
+    <label for="conditions">Conditions:</label>
+    <textarea id="conditions" placeholder="e.g., User must not be under 18. Post must be about learning a new skill."></textarea>
+
+    <button id="startStopBtn">Start</button>
+
+    <label for="statusLog">Status:</label>
+    <div id="statusLog">
+        Welcome! Click Start to begin.
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
