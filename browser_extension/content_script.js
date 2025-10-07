@@ -1,38 +1,46 @@
 (function() {
-    console.log("Content script running for enhanced scraping...");
+    console.log("Content script running for enhanced scraping (with debug logs)...");
 
-    // This selector targets the container of an entire post.
-    const postContainerSelector = '[data-testid="post-container"]';
-    
+    // New, more robust selector for the entire post container
+    const postContainerSelector = 'shreddit-post';
+    console.log("Looking for post containers with selector:", postContainerSelector);
     const postContainers = document.querySelectorAll(postContainerSelector);
+    console.log(`Found ${postContainers.length} post containers.`);
     
     const scrapedData = [];
 
-    postContainers.forEach(container => {
-        // Find the author and post link *within* each container.
-        const authorEl = container.querySelector('a[data-testid="post-author-name"]');
-        // This selector targets the post title link.
-        const postLinkEl = container.querySelector('a[data-testid="post-title"]');
+    postContainers.forEach((container, index) => {
+        console.log(`Processing container ${index}...`);
+        
+        // Extract author and permalink directly from the shreddit-post attributes
+        const author = container.getAttribute('author');
+        const permalink = container.getAttribute('permalink'); // This is the relative URL
+        const postTitle = container.getAttribute('post-title'); // Also useful for context
 
-        if (authorEl && postLinkEl) {
-            const author = authorEl.textContent.trim();
-            const postUrl = postLinkEl.href;
-            
-            // Ensure we have both before adding.
-            if (author && postUrl) {
-                scrapedData.push({ author, postUrl });
-            }
+        // Construct the full URL
+        const postUrl = permalink ? `https://www.reddit.com${permalink}` : null;
+
+        if (author && postUrl && postTitle) {
+            scrapedData.push({ author, postUrl, postTitle });
+            console.log(`  - Found author: ${author}, postUrl: ${postUrl}, postTitle: ${postTitle}`);
+        } else {
+            console.log("  - Could not extract author, postUrl, or postTitle from attributes.");
+            console.log("    Author found:", !!author);
+            console.log("    Post URL found:", !!postUrl);
+            console.log("    Post Title found:", !!postTitle);
         }
     });
 
-    console.log(`Scraped ${scrapedData.length} posts:`, scrapedData);
+    console.log(`Finished scraping. Total unique posts found: ${scrapedData.length}`);
 
-    // Send the richer data back to the background script.
     if (scrapedData.length > 0) {
+        console.log("Sending scraped data to background script:", scrapedData);
         chrome.runtime.sendMessage({
             command: 'scrapedData',
             data: scrapedData
         });
+    } else {
+        console.log("No posts scraped. Not sending message to background script.");
     }
 
 })();

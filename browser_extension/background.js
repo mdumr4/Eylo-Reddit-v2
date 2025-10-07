@@ -10,7 +10,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         'stop': handleStop,
         'scrapedData': handleScrapedData,
         'scrapedPostContent': handleScrapedPostContent,
-        'scrapingError': handleScrapingError
+        'scrapingError': handleScrapingError,
+        'messageSent': handleMessageSent
     };
 
     const commandHandler = commands[message.command];
@@ -36,13 +37,12 @@ function handleStop() {
 }
 
 function handleScrapedData(message) {
-    console.log('Received scraped data from content script:', message.data);
     filterUsers(message.data);
 }
 
 function handleScrapingError(message, sender) {
     console.error(`Scraping error in tab ${sender.tab.id}:`, message.data.error);
-    chrome.tabs.remove(sender.tab.id); // Close the tab that had an error
+    chrome.tabs.remove(sender.tab.id);
     tabUserMap.delete(sender.tab.id);
 }
 
@@ -51,7 +51,7 @@ async function handleScrapedPostContent(message, sender) {
     const user = tabUserMap.get(tabId);
     if (!user) return;
 
-    console.log(`Received post content from tab ${tabId} for user ${user.author}`);
+    console.log(`Received post content for user ${user.author}`);
 
     try {
         const response = await fetch('http://127.0.0.1:5000/generate-message', {
@@ -70,29 +70,48 @@ async function handleScrapedPostContent(message, sender) {
         console.log(`Gemini decision for ${user.author}:`, result);
 
         if (result.should_message === "YES") {
-            // FINAL STEP (to be implemented next):
-            // Send a command to post_handler.js to perform the messaging UI automation.
-            console.log(`SUCCESS: Would now send message to ${user.author}.`);
-            // chrome.tabs.sendMessage(tabId, { command: 'sendMessage', data: result });
+            console.log(`Sending message command to tab ${tabId} for user ${user.author}.`);
+            chrome.tabs.sendMessage(tabId, { command: 'sendMessage', data: result });
         } else {
             console.log(`Skipping user ${user.author} as per Gemini decision.`);
+            chrome.tabs.remove(tabId);
+            tabUserMap.delete(tabId);
         }
 
     } catch (error) {
-        console.error('Error during Gemini processing:', error);
-    } finally {
-        // For now, we'll close the tab regardless. Later, this will be handled
-        // after the message is confirmed sent.
+        console.error('Error during Gemini processing for tab', tabId, error);
         chrome.tabs.remove(tabId);
         tabUserMap.delete(tabId);
     }
 }
 
+async function handleMessageSent(message, sender) {
+    const tabId = sender.tab.id;
+    const user = tabUserMap.get(tabId);
+    if (!user) return;
+
+    console.log(`Confirmed message sent to ${user.author}. Logging to database.`);
+    try {
+        await fetch('http://127.0.0.1:5000/log-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: user.author }),
+        });
+        console.log(`Successfully logged ${user.author}.`);
+    } catch (error) {
+        console.error(`Failed to log user ${user.author}:`, error);
+    } finally {
+        chrome.tabs.remove(tabId);
+        tabUserMap.delete(tabId);
+    }
+}
 
 // --- Workflow Functions ---
 async function startAutomation() {
     console.log("Kicking off automation...");
+    console.log("Querying for active tab...");
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    console.log("Active tab query complete.");
 
     if (!tab || !tab.url.includes('reddit.com')) {
         console.error("Not on a Reddit page. Stopping automation.");
@@ -103,6 +122,7 @@ async function startAutomation() {
     console.log(`Running on tab: ${tab.id}, URL: ${tab.url}`);
 
     try {
+        console.log("Attempting to inject content script...");
         await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             files: ['content_script.js']
@@ -116,33 +136,21 @@ async function startAutomation() {
 
 async function filterUsers(scrapedPosts) {
     if (!isRunning) return;
-
     const authors = scrapedPosts.map(post => post.author);
     const uniqueAuthors = [...new Set(authors)];
-
     console.log(`Sending ${uniqueAuthors.length} unique authors to the backend for filtering...`);
     try {
         const response = await fetch('http://127.0.0.1:5000/check-users', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usernames: uniqueAuthors }),
         });
-
-        if (!response.ok) {
-            throw new Error(`Backend responded with status: ${response.status}`);
-        }
-
+        if (!response.ok) throw new Error(`Backend responded with status: ${response.status}`);
         const result = await response.json();
         const newAuthors = new Set(result.new_users);
-
         const fullDataForNewUsers = scrapedPosts.filter(post => newAuthors.has(post.author));
-
         console.log(`Backend returned ${fullDataForNewUsers.length} new users to process:`, fullDataForNewUsers);
-
         processUsers(fullDataForNewUsers);
-
     } catch (error) {
         console.error('Error communicating with the backend:', error);
         isRunning = false;
@@ -152,7 +160,6 @@ async function filterUsers(scrapedPosts) {
 async function processUsers(usersToProcess) {
     console.log(`Starting to process ${usersToProcess.length} users one by one.`);
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
     for (const user of usersToProcess) {
         if (!isRunning) {
             console.log("Automation stopped by user.");
@@ -161,11 +168,9 @@ async function processUsers(usersToProcess) {
         console.log(`Processing user: ${user.author}, post: ${user.postUrl}`);
         try {
             const tab = await chrome.tabs.create({ url: user.postUrl, active: false });
-            tabUserMap.set(tab.id, user); // Associate tab ID with user data
+            tabUserMap.set(tab.id, user);
             console.log(`Created background tab ${tab.id} for user ${user.author}`);
-            
-            await sleep(4000); // Give tab time to load before injecting
-            
+            await sleep(4000);
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
                 files: ['post_handler.js']
@@ -173,7 +178,6 @@ async function processUsers(usersToProcess) {
         } catch (error) {
             console.error(`Error processing user ${user.author}:`, error);
         }
-        
         const randomDelay = Math.random() * 5000 + 3000;
         await sleep(randomDelay);
     }
