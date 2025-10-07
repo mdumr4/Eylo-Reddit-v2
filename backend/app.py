@@ -5,6 +5,7 @@ from flask import Flask, request, jsonify
 from google.cloud import firestore
 import google.generativeai as genai
 from dotenv import load_dotenv
+from flask_cors import CORS # New import
 
 # Load environment variables from .env file
 load_dotenv()
@@ -23,6 +24,7 @@ model = genai.GenerativeModel('gemini-pro')
 
 # Create the Flask application instance
 app = Flask(__name__)
+CORS(app) # New line: Enable CORS for all routes
 
 # --- Helper Functions ---
 
@@ -57,7 +59,7 @@ def check_users():
     usernames_to_check = data.get('usernames', [])
     if not usernames_to_check:
         return jsonify({"new_users": []})
-    
+
     # Firestore's 'in' operator is limited to 30 items per query.
     # For a more robust solution, we would batch the requests.
     # This is sufficient for our initial version.
@@ -65,7 +67,7 @@ def check_users():
     query = users_ref.where('__name__', 'in', usernames_to_check)
     results = query.stream()
     existing_users = {result.id for result in results}
-    
+
     new_users = [user for user in usernames_to_check if user not in existing_users]
     print(f"Checked {len(usernames_to_check)} users. Found {len(new_users)} new users.")
     return jsonify({"new_users": new_users})
@@ -86,10 +88,10 @@ def generate_message():
 
     try:
         full_prompt = build_gemini_prompt(post_content, conditions, prompt_instruction)
-        
+
         # Call the Gemini API
         response = model.generate_content(full_prompt)
-        
+
         # Clean up and parse the JSON response from the model
         # A simple cleanup for "```json\n{...}\n```" format
         response_text = response.text.strip()
@@ -97,7 +99,7 @@ def generate_message():
             response_text = response_text[7:]
         if response_text.endswith("```"):
             response_text = response_text[:-3]
-        
+
         json_response = json.loads(response_text)
 
         print(f"Gemini response: {json_response}")
