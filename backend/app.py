@@ -55,20 +55,30 @@ def health_check():
 
 @app.route('/check-users', methods=['POST'])
 def check_users():
+    """
+    Receives a list of usernames and checks which ones are NOT in the
+    'messaged_users' collection in Firestore. Handles Firestore's 'in' operator limit.
+    """
     data = request.get_json()
     usernames_to_check = data.get('usernames', [])
+
     if not usernames_to_check:
         return jsonify({"new_users": []})
 
-    # Firestore's 'in' operator is limited to 30 items per query.
-    # For a more robust solution, we would batch the requests.
-    # This is sufficient for our initial version.
     users_ref = db.collection('messaged_users')
-    query = users_ref.where('__name__', 'in', usernames_to_check)
-    results = query.stream()
-    existing_users = {result.id for result in results}
+    all_existing_users = set()
 
-    new_users = [user for user in usernames_to_check if user not in existing_users]
+    # Firestore 'in' operator has a limit of 30 values. Batch the queries.
+    batch_size = 30
+    for i in range(0, len(usernames_to_check), batch_size):
+        batch = usernames_to_check[i:i + batch_size]
+        query = users_ref.where('__name__', 'in', batch)
+        results = query.stream()
+        for result in results:
+            all_existing_users.add(result.id)
+
+    new_users = [user for user in usernames_to_check if user not in all_existing_users]
+
     print(f"Checked {len(usernames_to_check)} users. Found {len(new_users)} new users.")
     return jsonify({"new_users": new_users})
 

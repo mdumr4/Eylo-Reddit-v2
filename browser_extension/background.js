@@ -107,6 +107,19 @@ async function handleMessageSent(message, sender) {
 }
 
 // --- Workflow Functions ---
+// Helper function to wait for a tab to finish loading
+function waitForTabLoad(tabId) {
+    return new Promise(resolve => {
+        const listener = (updatedTabId, changeInfo, tab) => {
+            if (updatedTabId === tabId && changeInfo.status === 'complete') {
+                chrome.tabs.onUpdated.removeListener(listener); // Remove listener to prevent memory leaks
+                resolve();
+            }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+    });
+}
+
 async function startAutomation() {
     console.log("Kicking off automation...");
     console.log("Querying for active tab...");
@@ -170,15 +183,23 @@ async function processUsers(usersToProcess) {
             const tab = await chrome.tabs.create({ url: user.postUrl, active: false });
             tabUserMap.set(tab.id, user);
             console.log(`Created background tab ${tab.id} for user ${user.author}`);
-            await sleep(4000);
+            console.log(`Waiting for tab ${tab.id} to load...`);
+            await waitForTabLoad(tab.id);
+            console.log(`Tab ${tab.id} loaded. Attempting to inject post_handler.js.`);
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
                 files: ['post_handler.js']
             });
+            console.log(`Injected post_handler.js into tab ${tab.id}`);
         } catch (error) {
             console.error(`Error processing user ${user.author}:`, error);
+            if (tab && tab.id) {
+                chrome.tabs.remove(tab.id);
+                tabUserMap.delete(tab.id);
+            }
         }
         const randomDelay = Math.random() * 5000 + 3000;
+        console.log(`Waiting for ${Math.round(randomDelay / 1000)}s before next user...`);
         await sleep(randomDelay);
     }
     console.log("Finished processing all users.");
