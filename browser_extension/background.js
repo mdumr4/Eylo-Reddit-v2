@@ -42,8 +42,8 @@ function handleScrapedData(message) {
 
 function handleScrapingError(message, sender) {
     console.error(`Scraping error in tab ${sender.tab.id}:`, message.data.error);
-    chrome.tabs.remove(sender.tab.id);
-    tabUserMap.delete(sender.tab.id);
+    // chrome.tabs.remove(sender.tab.id); // Temporarily disabled for debugging
+    // tabUserMap.delete(sender.tab.id); // Temporarily disabled for debugging
 }
 
 async function handleScrapedPostContent(message, sender) {
@@ -74,14 +74,14 @@ async function handleScrapedPostContent(message, sender) {
             chrome.tabs.sendMessage(tabId, { command: 'sendMessage', data: result });
         } else {
             console.log(`Skipping user ${user.author} as per Gemini decision.`);
-            chrome.tabs.remove(tabId);
-            tabUserMap.delete(tabId);
+            // chrome.tabs.remove(tabId); // Temporarily disabled for debugging
+            // tabUserMap.delete(tabId); // Temporarily disabled for debugging
         }
 
     } catch (error) {
         console.error('Error during Gemini processing for tab', tabId, error);
-        chrome.tabs.remove(tabId);
-        tabUserMap.delete(tabId);
+        // chrome.tabs.remove(tabId); // Temporarily disabled for debugging
+        // tabUserMap.delete(tabId); // Temporarily disabled for debugging
     }
 }
 
@@ -101,8 +101,8 @@ async function handleMessageSent(message, sender) {
     } catch (error) {
         console.error(`Failed to log user ${user.author}:`, error);
     } finally {
-        chrome.tabs.remove(tabId);
-        tabUserMap.delete(tabId);
+        // chrome.tabs.remove(tabId); // Temporarily disabled for debugging
+        // tabUserMap.delete(tabId); // Temporarily disabled for debugging
     }
 }
 
@@ -194,8 +194,8 @@ async function processUsers(usersToProcess) {
         } catch (error) {
             console.error(`Error processing user ${user.author}:`, error);
             if (tab && tab.id) {
-                chrome.tabs.remove(tab.id);
-                tabUserMap.delete(tab.id);
+                // chrome.tabs.remove(tab.id); // Temporarily disabled for debugging
+                // tabUserMap.delete(tab.id); // Temporarily disabled for debugging
             }
         }
         const randomDelay = Math.random() * 5000 + 3000;

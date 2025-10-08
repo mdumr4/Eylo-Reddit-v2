@@ -20,7 +20,9 @@ db = firestore.Client()
 # Assumes GOOGLE_API_KEY environment variable is set.
 # Make sure to get your key from Google AI Studio and set the environment variable.
 genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
-model = genai.GenerativeModel('gemini-pro')
+
+# Use the correct model name identified from the list
+model = genai.GenerativeModel('models/gemini-pro-latest') 
 
 # Create the Flask application instance
 app = Flask(__name__)
@@ -56,7 +58,7 @@ def health_check():
 @app.route('/check-users', methods=['POST'])
 def check_users():
     """
-    Receives a list of usernames and checks which ones are NOT in the
+    Receives a list of usernames and checks which ones are NOT in the 
     'messaged_users' collection in Firestore. Handles Firestore's 'in' operator limit.
     """
     data = request.get_json()
@@ -67,7 +69,7 @@ def check_users():
 
     users_ref = db.collection('messaged_users')
     all_existing_users = set()
-
+    
     # Firestore 'in' operator has a limit of 30 values. Batch the queries.
     batch_size = 30
     for i in range(0, len(usernames_to_check), batch_size):
@@ -76,7 +78,7 @@ def check_users():
         results = query.stream()
         for result in results:
             all_existing_users.add(result.id)
-
+    
     new_users = [user for user in usernames_to_check if user not in all_existing_users]
 
     print(f"Checked {len(usernames_to_check)} users. Found {len(new_users)} new users.")
@@ -98,10 +100,10 @@ def generate_message():
 
     try:
         full_prompt = build_gemini_prompt(post_content, conditions, prompt_instruction)
-
+        
         # Call the Gemini API
         response = model.generate_content(full_prompt)
-
+        
         # Clean up and parse the JSON response from the model
         # A simple cleanup for "```json\n{...}\n```" format
         response_text = response.text.strip()
@@ -109,7 +111,7 @@ def generate_message():
             response_text = response_text[7:]
         if response_text.endswith("```"):
             response_text = response_text[:-3]
-
+        
         json_response = json.loads(response_text)
 
         print(f"Gemini response: {json_response}")
