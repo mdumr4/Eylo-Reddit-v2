@@ -42,8 +42,8 @@ function handleScrapedData(message) {
 
 function handleScrapingError(message, sender) {
     console.error(`Scraping error in tab ${sender.tab.id}:`, message.data.error);
-    // chrome.tabs.remove(sender.tab.id); // Temporarily disabled for debugging
-    // tabUserMap.delete(sender.tab.id); // Temporarily disabled for debugging
+    chrome.tabs.remove(sender.tab.id); // Re-enabled tab closure
+    tabUserMap.delete(sender.tab.id); // Re-enabled map deletion
 }
 
 async function handleScrapedPostContent(message, sender) {
@@ -54,6 +54,7 @@ async function handleScrapedPostContent(message, sender) {
     console.log(`Received post content for user ${user.author}`);
 
     try {
+        // --- RE-ENABLED ACTUAL GEMINI API CALL ---
         const response = await fetch('http://127.0.0.1:5000/generate-message', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -65,8 +66,9 @@ async function handleScrapedPostContent(message, sender) {
         });
 
         if (!response.ok) throw new Error(`Backend responded with status: ${response.status}`);
-
         const result = await response.json();
+        // --- END RE-ENABLED ACTUAL GEMINI API CALL ---
+
         console.log(`Gemini decision for ${user.author}:`, result);
 
         if (result.should_message === "YES") {
@@ -74,14 +76,14 @@ async function handleScrapedPostContent(message, sender) {
             chrome.tabs.sendMessage(tabId, { command: 'sendMessage', data: result });
         } else {
             console.log(`Skipping user ${user.author} as per Gemini decision.`);
-            // chrome.tabs.remove(tabId); // Temporarily disabled for debugging
-            // tabUserMap.delete(tabId); // Temporarily disabled for debugging
+            chrome.tabs.remove(tabId); // Re-enabled tab closure
+            tabUserMap.delete(tabId); // Re-enabled map deletion
         }
 
     } catch (error) {
         console.error('Error during Gemini processing for tab', tabId, error);
-        // chrome.tabs.remove(tabId); // Temporarily disabled for debugging
-        // tabUserMap.delete(tabId); // Temporarily disabled for debugging
+        chrome.tabs.remove(tabId); // Re-enabled tab closure
+        tabUserMap.delete(tabId); // Re-enabled map deletion
     }
 }
 
@@ -101,8 +103,8 @@ async function handleMessageSent(message, sender) {
     } catch (error) {
         console.error(`Failed to log user ${user.author}:`, error);
     } finally {
-        // chrome.tabs.remove(tabId); // Temporarily disabled for debugging
-        // tabUserMap.delete(tabId); // Temporarily disabled for debugging
+        chrome.tabs.remove(tabId); // Re-enabled tab closure
+        tabUserMap.delete(tabId); // Re-enabled map deletion
     }
 }
 
@@ -179,8 +181,9 @@ async function processUsers(usersToProcess) {
             break;
         }
         console.log(`Processing user: ${user.author}, post: ${user.postUrl}`);
+        let tab = null; // Declare tab outside try block
         try {
-            const tab = await chrome.tabs.create({ url: user.postUrl, active: false });
+            tab = await chrome.tabs.create({ url: user.postUrl, active: false });
             tabUserMap.set(tab.id, user);
             console.log(`Created background tab ${tab.id} for user ${user.author}`);
             console.log(`Waiting for tab ${tab.id} to load...`);
@@ -192,11 +195,9 @@ async function processUsers(usersToProcess) {
             });
             console.log(`Injected post_handler.js into tab ${tab.id}`);
         } catch (error) {
-            console.error(`Error processing user ${user.author}:`, error);
-            if (tab && tab.id) {
-                // chrome.tabs.remove(tab.id); // Temporarily disabled for debugging
-                // tabUserMap.delete(tab.id); // Temporarily disabled for debugging
-            }
+            console.error(`Error processing user ${user.author} in loop:`, error);
+            // Do NOT remove tab or delete from map here, as it might be needed for further debugging
+            // The error in post_handler.js will send a scrapingError command which handles tab closure
         }
         const randomDelay = Math.random() * 5000 + 3000;
         console.log(`Waiting for ${Math.round(randomDelay / 1000)}s before next user...`);

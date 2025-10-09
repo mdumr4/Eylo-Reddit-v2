@@ -4,10 +4,50 @@
 (function() {
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+    // Helper function to recursively wait for an element to appear in the DOM, including nested Shadow DOMs
+    function waitForElement(selector, root = document, timeout = 10000) {
+        return new Promise((resolve, reject) => {
+            const startTime = Date.now();
+            const interval = setInterval(() => {
+                let foundElement = null;
+
+                // Recursive search function
+                function search(currentRoot) {
+                    // Try to find the element in the current root
+                    let element = currentRoot.querySelector(selector);
+                    if (element) {
+                        return element;
+                    }
+
+                    // If not found, and currentRoot has shadow DOMs, search within them
+                    const shadowHosts = currentRoot.querySelectorAll('*');
+                    for (const host of shadowHosts) {
+                        if (host.shadowRoot) {
+                            element = search(host.shadowRoot); // Recursive call
+                            if (element) {
+                                return element;
+                            }
+                        }
+                    }
+                    return null;
+                }
+
+                foundElement = search(root);
+
+                if (foundElement) {
+                    clearInterval(interval);
+                    resolve(foundElement);
+                } else if (Date.now() - startTime > timeout) {
+                    clearInterval(interval);
+                    reject(new Error(`Element "${selector}" not found within timeout in root.`));
+                }
+            }, 250); // Check every 250ms
+        });
+    }
+
     // --- Part 1: Scrape post content and send it to the background script ---
     function scrapePostContent() {
         console.log("post_handler.js: Scraping post content...");
-        // Updated selectors based on provided HTML
         const titleSelector = 'h1[slot="title"]';
         const contentSelector = 'div[property="schema:articleBody"]';
 
@@ -42,41 +82,45 @@
     async function performMessaging(messageBody) {
         console.log("Starting UI automation to send message...");
         try {
-            // 1. Find the author's username link to hover over.
-            const authorLink = document.querySelector('a[aria-label^="Author:"]'); // More generic selector
-            if (!authorLink) throw new Error("Could not find author link to hover.");
+            // 1. Extract author from the current post page
+            const authorLinkOnPostPage = document.querySelector('a[aria-label^="Author:"]');
+            if (!authorLinkOnPostPage) throw new Error("Could not find author link on post page.");
+            const authorUsername = authorLinkOnPostPage.href.split('/').filter(Boolean).pop();
+            if (!authorUsername) throw new Error("Could not extract username from author link.");
 
-            // 2. Simulate hover to show the profile card.
-            authorLink.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-            await sleep(1500); // Wait for card to appear
+            const userProfileUrl = `https://www.reddit.com/user/${authorUsername}/`;
+            console.log(`Navigating to user profile: ${userProfileUrl}`);
 
-            // 3. Find and click the "Start Chat" button on the card.
-            // This selector is highly specific and likely to change.
-            const startChatButton = document.querySelector('button[aria-label*="Start chat"]');
-            if (!startChatButton) throw new Error("Could not find 'Start Chat' button.");
+            // Navigate to the user's profile page
+            window.location.href = userProfileUrl;
+
+            // Wait for the profile page to load and for the chat button to appear
+            const startChatButton = await waitForElement('a[data-testid="private-chat-button"]');
+            console.log("Found 'Start Chat' button on user profile.");
+            await sleep(Math.random() * 1000 + 500); // Human-like delay before click
 
             startChatButton.click();
-            await sleep(2000); // Wait for chat modal to open
+            console.log("Clicked 'Start Chat' button.");
 
-            // 4. Find the text area and type the message.
-            const chatTextArea = document.querySelector('div[aria-label="Message"] > p');
-            if (!chatTextArea) throw new Error("Could not find chat message text area.");
+            // Wait for the chat modal's text area to appear (now handles nested Shadow DOMs)
+            const chatTextArea = await waitForElement('textarea[name="message"]');
+            console.log("Found chat message text area.");
+            await sleep(Math.random() * 500 + 200); // Human-like delay before typing
 
             chatTextArea.focus();
-            chatTextArea.textContent = messageBody;
-            // Dispatch an input event to make sure Reddit's framework recognizes the change.
+            chatTextArea.value = messageBody; // Use .value for textarea
             chatTextArea.dispatchEvent(new Event('input', { bubbles: true }));
-            await sleep(1000);
+            await sleep(Math.random() * 1000 + 500); // Human-like delay after typing
 
-            // 5. Find and click the final send button.
-            const sendButton = document.querySelector('button[aria-label="Send Message"]');
-            if (!sendButton) throw new Error("Could not find final send button.");
+            // Wait for the send button to appear (now handles nested Shadow DOMs)
+            const sendButton = await waitForElement('button[aria-label="Send message"]');
+            console.log("Found final send button.");
+            await sleep(Math.random() * 500 + 200); // Human-like delay before click
 
             sendButton.click();
             console.log("Message sent successfully!");
 
-            // 6. Send confirmation back to the background script.
-            await sleep(2000); // Wait for message to send
+            await sleep(Math.random() * 2000 + 1000); // Human-like delay after sending
             chrome.runtime.sendMessage({ command: 'messageSent' });
 
         } catch (error) {
