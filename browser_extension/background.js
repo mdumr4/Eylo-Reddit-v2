@@ -76,8 +76,6 @@ async function handleScrapedPostContent(message, sender) {
             chrome.tabs.sendMessage(tabId, { command: 'sendMessage', data: result });
         } else {
             console.log(`Skipping user ${user.author} as per Gemini decision.`);
-            chrome.tabs.remove(tabId); // Re-enabled tab closure
-            tabUserMap.delete(tabId); // Re-enabled map deletion
         }
 
     } catch (error) {
@@ -102,9 +100,6 @@ async function handleMessageSent(message, sender) {
         console.log(`Successfully logged ${user.author}.`);
     } catch (error) {
         console.error(`Failed to log user ${user.author}:`, error);
-    } finally {
-        chrome.tabs.remove(tabId); // Re-enabled tab closure
-        tabUserMap.delete(tabId); // Re-enabled map deletion
     }
 }
 
