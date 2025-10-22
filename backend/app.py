@@ -11,6 +11,8 @@ from flask_cors import CORS # New import
 load_dotenv()
 
 # --- Initialization ---
+print(f"GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
+print(f"GOOGLE_API_KEY: {os.environ.get('GOOGLE_API_KEY')}")
 
 # Initialize Firestore Client
 # Assumes GOOGLE_APPLICATION_CREDENTIALS environment variable is set.

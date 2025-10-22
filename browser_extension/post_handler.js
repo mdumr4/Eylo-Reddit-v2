@@ -5,7 +5,7 @@
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
     // Helper function to recursively wait for an element to appear in the DOM, including nested Shadow DOMs
-    function waitForElement(selector, root = document, timeout = 10000) {
+    function waitForElement(selector, root = document, timeout = 15000, matchFunction = null) {
         return new Promise((resolve, reject) => {
             const startTime = Date.now();
             const interval = setInterval(() => {
@@ -14,18 +14,24 @@
                 // Recursive search function
                 function search(currentRoot) {
                     // Try to find the element in the current root
-                    let element = currentRoot.querySelector(selector);
-                    if (element) {
-                        return element;
+                    let elements = currentRoot.querySelectorAll(selector);
+                    if (matchFunction) {
+                        for (const el of elements) {
+                            if (matchFunction(el)) {
+                                return el;
+                            }
+                        }
+                    } else if (elements.length > 0) {
+                        return elements[0]; // Return the first element if no matchFunction
                     }
 
                     // If not found, and currentRoot has shadow DOMs, search within them
                     const shadowHosts = currentRoot.querySelectorAll('*');
                     for (const host of shadowHosts) {
                         if (host.shadowRoot) {
-                            element = search(host.shadowRoot); // Recursive call
-                            if (element) {
-                                return element;
+                            let shadowElement = search(host.shadowRoot); // Recursive call
+                            if (shadowElement) {
+                                return shadowElement;
                             }
                         }
                     }
@@ -102,26 +108,75 @@
             startChatButton.click();
             console.log("Clicked 'Start Chat' button.");
 
-            // Wait for the chat modal's text area to appear (now handles nested Shadow DOMs)
-            const chatTextArea = await waitForElement('textarea[name="message"]');
-            console.log("Found chat message text area.");
-            await sleep(Math.random() * 500 + 200); // Human-like delay before typing
+            // Wait for the send button to appear (it might act as the "Send Invite" button initially)
+            const inviteSendButton = await waitForElement('button[aria-label="Send message"]');
+            console.log("Found initial invite send button.");
+
+            // --- NEW: Click the send button to send the initial invite ---
+            console.log("Clicking send button to send initial invite message.");
+            inviteSendButton.click();
+            await sleep(Math.random() * 1000 + 500); // Human-like delay after clicking invite
+
+            // Wait for the chat text area to appear
+            const chatTextArea = await waitForElement('textarea[placeholder*="Message"], div[contenteditable="true"]');
+            console.log("Found chat text area.");
+
+            // --- NEW: Wait for the chatTextArea to become ENABLED ---
+            console.log("Waiting for chat text area to become enabled...");
+            let textareaEnabled = false;
+            let attempts = 0;
+            while (!textareaEnabled && attempts < 50) { // Try up to 50 times (10 seconds)
+                await sleep(200); // Check every 200ms
+                if (chatTextArea.tagName === 'TEXTAREA') {
+                    if (!chatTextArea.disabled) {
+                        textareaEnabled = true;
+                    }
+                } else if (chatTextArea.tagName === 'DIV') {
+                    if (chatTextArea.contentEditable === 'true') {
+                        textareaEnabled = true;
+                    }
+                }
+                attempts++;
+            }
+
+            if (!textareaEnabled) {
+                throw new Error("Chat text area did not become enabled within timeout.");
+            }
+            console.log("Chat text area is now enabled. Proceeding with message injection.");
+            await sleep(Math.random() * 500 + 200); // Human-like delay after chat is ready
 
             chatTextArea.focus();
-            chatTextArea.value = messageBody; // Use .value for textarea
-            chatTextArea.dispatchEvent(new Event('input', { bubbles: true }));
+
+            // Robust message injection loop (into the now enabled textarea)
+            let messageInjected = false;
+            for (let i = 0; i < 10; i++) { // Try up to 10 times
+                chatTextArea.value = messageBody;
+                chatTextArea.dispatchEvent(new Event('input', { bubbles: true }));
+                chatTextArea.dispatchEvent(new Event('change', { bubbles: true }));
+                await sleep(200); // Short delay to allow Reddit's UI to process
+                if (chatTextArea.value === messageBody) {
+                    messageInjected = true;
+                    break;
+                }
+            }
+
+            if (!messageInjected) {
+                throw new Error("Failed to inject message into chat text area after multiple attempts.");
+            }
+
             await sleep(Math.random() * 1000 + 500); // Human-like delay after typing
 
             // Wait for the send button to appear (now handles nested Shadow DOMs)
-            const sendButton = await waitForElement('button[aria-label="Send message"]');
-            console.log("Found final send button.");
-            await sleep(Math.random() * 500 + 200); // Human-like delay before click
+            const finalSendButton = await waitForElement('button[aria-label="Send message"]');
+            console.log("Found final send button."); // Log again for clarity
+            await sleep(Math.random() * 3000 + 1500); // Human-like delay before click and after message injection
 
-            sendButton.click();
+            finalSendButton.click();
             console.log("Message sent successfully!");
 
-            await sleep(Math.random() * 2000 + 1000); // Human-like delay after sending
+            await sleep(Math.random() * 5000 + 3000); // Increased delay after sending
             chrome.runtime.sendMessage({ command: 'messageSent' });
+            // --- END NEW ---
 
         } catch (error) {
             console.error("Error during messaging automation:", error);

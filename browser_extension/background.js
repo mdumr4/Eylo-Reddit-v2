@@ -42,7 +42,7 @@ function handleScrapedData(message) {
 
 function handleScrapingError(message, sender) {
     console.error(`Scraping error in tab ${sender.tab.id}:`, message.data.error);
-    chrome.tabs.remove(sender.tab.id); // Re-enabled tab closure
+    // chrome.tabs.remove(sender.tab.id); // Re-enabled tab closure
     tabUserMap.delete(sender.tab.id); // Re-enabled map deletion
 }
 
@@ -178,7 +178,7 @@ async function processUsers(usersToProcess) {
         console.log(`Processing user: ${user.author}, post: ${user.postUrl}`);
         let tab = null; // Declare tab outside try block
         try {
-            tab = await chrome.tabs.create({ url: user.postUrl, active: false });
+            tab = await chrome.tabs.create({ url: user.postUrl, active: true });
             tabUserMap.set(tab.id, user);
             console.log(`Created background tab ${tab.id} for user ${user.author}`);
             console.log(`Waiting for tab ${tab.id} to load...`);
@@ -194,7 +194,19 @@ async function processUsers(usersToProcess) {
             // Do NOT remove tab or delete from map here, as it might be needed for further debugging
             // The error in post_handler.js will send a scrapingError command which handles tab closure
         }
-        const randomDelay = Math.random() * 5000 + 3000;
+        // --- NEW: Weighted Random Delay Calculation ---
+        let randomDelay;
+        const delayType = Math.random(); // Generate a random number between 0 and 1
+
+        if (delayType < 0.7) { // 70% chance for short delay (5-30 seconds)
+            randomDelay = Math.random() * (30000 - 5000) + 5000; // 5 to 30 seconds
+        } else if (delayType < 0.9) { // 20% chance for medium delay (30-60 seconds)
+            randomDelay = Math.random() * (60000 - 30000) + 30000; // 30 to 60 seconds
+        } else { // 10% chance for long delay (60-120 seconds)
+            randomDelay = Math.random() * (120000 - 60000) + 60000; // 60 to 120 seconds
+        }
+        // --- END NEW ---
+
         console.log(`Waiting for ${Math.round(randomDelay / 1000)}s before next user...`);
         await sleep(randomDelay);
     }
