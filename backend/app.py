@@ -100,29 +100,39 @@ def generate_message():
     if not all([post_content, conditions, prompt_instruction]):
         return jsonify({"status": "error", "message": "Missing required data"}), 400
 
-    try:
-        full_prompt = build_gemini_prompt(post_content, conditions, prompt_instruction)
-        
-        # Call the Gemini API
-        response = model.generate_content(full_prompt)
-        
-        # Clean up and parse the JSON response from the model
-        # A simple cleanup for "```json\n{...}\n```" format
-        response_text = response.text.strip()
-        if response_text.startswith("```json"):
-            response_text = response_text[7:]
-        if response_text.endswith("```"):
-            response_text = response_text[:-3]
-        
-        json_response = json.loads(response_text)
+    # --- MOCK IMPLEMENTATION FOR TESTING ---
+    print("--- USING MOCK /generate-message RESPONSE ---")
+    mock_response = {
+        "should_message": "YES",
+        "message_body": "This is a mock message for testing purposes. It's great to connect with you!"
+    }
+    print(f"Mock Gemini response: {mock_response}")
+    return jsonify(mock_response)
+    # --- END MOCK ---
 
-        print(f"Gemini response: {json_response}")
-        return jsonify(json_response)
+    # try:
+    #     full_prompt = build_gemini_prompt(post_content, conditions, prompt_instruction)
+        
+    #     # Call the Gemini API
+    #     response = model.generate_content(full_prompt)
+        
+    #     # Clean up and parse the JSON response from the model
+    #     # A simple cleanup for "```json\n{...}\n```" format
+    #     response_text = response.text.strip()
+    #     if response_text.startswith("```json"):
+    #         response_text = response_text[7:]
+    #     if response_text.endswith("```"):
+    #         response_text = response_text[:-3]
+        
+    #     json_response = json.loads(response_text)
 
-    except Exception as e:
-        print(f"Error calling Gemini API or parsing response: {e}")
-        # It's good practice to return a structured error
-        return jsonify({"status": "error", "message": "Failed to process request with Gemini API.", "details": str(e)}), 500
+    #     print(f"Gemini response: {json_response}")
+    #     return jsonify(json_response)
+
+    # except Exception as e:
+    #     print(f"Error calling Gemini API or parsing response: {e}")
+    #     # It's good practice to return a structured error
+    #     return jsonify({"status": "error", "message": "Failed to process request with Gemini API.", "details": str(e)}), 500
 
 @app.route('/log-user', methods=['POST'])
 def log_user():

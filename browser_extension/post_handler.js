@@ -81,7 +81,6 @@
             console.log("Received sendMessage command.", message.data);
             performMessaging(message.data.message_body);
         }
-        return true;
     });
 
     // --- Part 3: The UI Automation Logic ---
@@ -108,27 +107,29 @@
             startChatButton.click();
             console.log("Clicked 'Start Chat' button.");
 
-            // Wait for the send button to appear (it might act as the "Send Invite" button initially)
-            const inviteSendButton = await waitForElement('button[aria-label="Send message"]');
-            console.log("Found initial invite send button.");
+            // *** CRITICAL FIX 1: Use the correct accessible name ***
+            // The chat text area has accessible name "Write message" not a placeholder
+            // Also need to wait longer for the chat panel to fully load
+            await sleep(2000); // Give chat panel time to open
 
-            // --- NEW: Click the send button to send the initial invite ---
-            console.log("Clicking send button to send initial invite message.");
-            inviteSendButton.click();
-            await sleep(Math.random() * 1000 + 500); // Human-like delay after clicking invite
+            // *** CRITICAL FIX 2: Search by aria-label instead of placeholder ***
+            const chatTextArea = await waitForElement(
+                'textarea[aria-label="Write message"], input[aria-label="Write message"]',
+                document,
+                15000
+            );
+            console.log("Found chat text area with accessible name 'Write message'.");
 
-            // Wait for the chat text area to appear
-            const chatTextArea = await waitForElement('textarea[placeholder*="Message"], div[contenteditable="true"]');
-            console.log("Found chat text area.");
-
-            // --- NEW: Wait for the chatTextArea to become ENABLED ---
+            // *** CRITICAL FIX 3: Check if textarea is enabled ***
             console.log("Waiting for chat text area to become enabled...");
             let textareaEnabled = false;
             let attempts = 0;
             while (!textareaEnabled && attempts < 50) { // Try up to 50 times (10 seconds)
                 await sleep(200); // Check every 200ms
-                if (chatTextArea.tagName === 'TEXTAREA') {
-                    if (!chatTextArea.disabled) {
+
+                // Check if it's a textarea or input
+                if (chatTextArea.tagName === 'TEXTAREA' || chatTextArea.tagName === 'INPUT') {
+                    if (!chatTextArea.disabled && !chatTextArea.readOnly) {
                         textareaEnabled = true;
                     }
                 } else if (chatTextArea.tagName === 'DIV') {
@@ -145,19 +146,33 @@
             console.log("Chat text area is now enabled. Proceeding with message injection.");
             await sleep(Math.random() * 500 + 200); // Human-like delay after chat is ready
 
+            // *** CRITICAL FIX 4: Focus and inject message properly ***
             chatTextArea.focus();
+            await sleep(300); // Wait for focus to take effect
 
-            // Robust message injection loop (into the now enabled textarea)
+            // Robust message injection loop
             let messageInjected = false;
             for (let i = 0; i < 10; i++) { // Try up to 10 times
+                // Clear existing value first
+                chatTextArea.value = '';
+                await sleep(100);
+
+                // Set new value
                 chatTextArea.value = messageBody;
+
+                // Trigger multiple events to ensure Reddit detects the change
                 chatTextArea.dispatchEvent(new Event('input', { bubbles: true }));
                 chatTextArea.dispatchEvent(new Event('change', { bubbles: true }));
-                await sleep(200); // Short delay to allow Reddit's UI to process
+                chatTextArea.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+
+                await sleep(300); // Wait for Reddit's UI to process
+
                 if (chatTextArea.value === messageBody) {
                     messageInjected = true;
+                    console.log("Message successfully injected into text area.");
                     break;
                 }
+                console.log(`Injection attempt ${i + 1} failed, retrying...`);
             }
 
             if (!messageInjected) {
@@ -166,17 +181,39 @@
 
             await sleep(Math.random() * 1000 + 500); // Human-like delay after typing
 
-            // Wait for the send button to appear (now handles nested Shadow DOMs)
-            const finalSendButton = await waitForElement('button[aria-label="Send message"]');
-            console.log("Found final send button."); // Log again for clarity
-            await sleep(Math.random() * 3000 + 1500); // Human-like delay before click and after message injection
+            // *** CRITICAL FIX 5: Wait for send button to become enabled ***
+            console.log("Looking for send button...");
+            const sendButton = await waitForElement(
+                'button[aria-label="Send message"]',
+                document,
+                15000
+            );
+            console.log("Found send button.");
 
-            finalSendButton.click();
-            console.log("Message sent successfully!");
+            // Wait for send button to be enabled (it's disabled when textarea is empty)
+            let sendButtonEnabled = false;
+            attempts = 0;
+            while (!sendButtonEnabled && attempts < 30) {
+                await sleep(200);
+                if (!sendButton.disabled && !sendButton.hasAttribute('disabled')) {
+                    sendButtonEnabled = true;
+                }
+                attempts++;
+            }
 
-            await sleep(Math.random() * 5000 + 3000); // Increased delay after sending
+            if (!sendButtonEnabled) {
+                console.warn("Send button did not become enabled, attempting to click anyway...");
+            } else {
+                console.log("Send button is enabled.");
+            }
+
+            await sleep(Math.random() * 1000 + 500); // Human-like delay before clicking send
+
+            sendButton.click();
+            console.log("Clicked send button. Message sent successfully!");
+
+            await sleep(Math.random() * 3000 + 2000); // Wait after sending
             chrome.runtime.sendMessage({ command: 'messageSent' });
-            // --- END NEW ---
 
         } catch (error) {
             console.error("Error during messaging automation:", error);
