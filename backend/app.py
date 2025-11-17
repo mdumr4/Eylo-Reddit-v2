@@ -104,7 +104,7 @@ def generate_message():
     print("--- USING MOCK /generate-message RESPONSE ---")
     mock_response = {
         "should_message": "YES",
-        "message_body": "This is a mock message for testing purposes. It's great to connect with you!"
+        "message_body": "Thank you for your post!"
     }
     print(f"Mock Gemini response: {mock_response}")
     return jsonify(mock_response)
