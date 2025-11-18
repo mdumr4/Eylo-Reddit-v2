@@ -5,47 +5,30 @@ from flask import Flask, request, jsonify
 from google.cloud import firestore
 import google.generativeai as genai
 from dotenv import load_dotenv
-from flask_cors import CORS # New import
+from flask_cors import CORS
 
 # Load environment variables from .env file
 load_dotenv()
 
 # --- Initialization ---
-print(f"GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
-print(f"GOOGLE_API_KEY: {os.environ.get('GOOGLE_API_KEY')}")
-
-# Initialize Firestore Client
-# Assumes GOOGLE_APPLICATION_CREDENTIALS environment variable is set.
 db = firestore.Client()
-
-# Configure Gemini API
-# Assumes GOOGLE_API_KEY environment variable is set.
-# Make sure to get your key from Google AI Studio and set the environment variable.
 genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
-
-# Use the correct model name identified from the list
-model = genai.GenerativeModel('models/gemini-pro-latest') 
-
-# Create the Flask application instance
+model = genai.GenerativeModel('gemini-pro') 
 app = Flask(__name__)
-CORS(app) # New line: Enable CORS for all routes
+CORS(app)
 
 # --- Helper Functions ---
 
-def build_gemini_prompt(post_content, conditions, prompt_instruction):
+def build_gemini_prompt(post_content, main_prompt):
     """Builds the structured prompt for the Gemini API."""
     return f"""
-System Prompt:
-You are an intelligent Reddit outreach assistant. Your task is to decide if a message should be sent based on a set of rules, and if so, to generate the message.
+System Instruction:
+{main_prompt}
 
-Rules (Conditions):
-{conditions}
-
-Post Content:
+---
+Post Content to Analyze:
 {post_content}
-
-Message Generation Instruction:
-{prompt_instruction}
+---
 
 Your Response Format:
 You must respond in a raw JSON format only, with no markdown. The JSON object should have two keys: "should_message" (string: "YES" or "NO") and "message_body" (string: the generated message, or an empty string if "should_message" is "NO").
@@ -61,11 +44,10 @@ def health_check():
 def check_users():
     """
     Receives a list of usernames and checks which ones are NOT in the 
-    'messaged_users' collection in Firestore. Handles Firestore's 'in' operator limit.
+    'messaged_users' collection in Firestore.
     """
     data = request.get_json()
     usernames_to_check = data.get('usernames', [])
-
     if not usernames_to_check:
         return jsonify({"new_users": []})
 
@@ -73,66 +55,49 @@ def check_users():
     all_existing_users = set()
     
     # Firestore 'in' operator has a limit of 30 values. Batch the queries.
-    batch_size = 30
-    for i in range(0, len(usernames_to_check), batch_size):
-        batch = usernames_to_check[i:i + batch_size]
+    for i in range(0, len(usernames_to_check), 30):
+        batch = usernames_to_check[i:i + 30]
         query = users_ref.where('__name__', 'in', batch)
-        results = query.stream()
-        for result in results:
+        for result in query.stream():
             all_existing_users.add(result.id)
     
     new_users = [user for user in usernames_to_check if user not in all_existing_users]
-
-    print(f"Checked {len(usernames_to_check)} users. Found {len(new_users)} new users.")
     return jsonify({"new_users": new_users})
 
 @app.route('/generate-message', methods=['POST'])
 def generate_message():
     """
-    Receives post data, conditions, and a prompt instruction.
-    Calls the Gemini API and returns its structured JSON response.
+    Receives post data and a main prompt, calls the Gemini API, 
+    and returns its structured JSON response.
     """
     data = request.get_json()
     post_content = data.get('post_content')
-    conditions = data.get('conditions')
-    prompt_instruction = data.get('prompt_instruction')
+    main_prompt = data.get('main_prompt')
 
-    if not all([post_content, conditions, prompt_instruction]):
-        return jsonify({"status": "error", "message": "Missing required data"}), 400
+    if not all([post_content, main_prompt]):
+        return jsonify({"status": "error", "message": "Missing 'post_content' or 'main_prompt'"}), 400
 
-    # --- MOCK IMPLEMENTATION FOR TESTING ---
-    print("--- USING MOCK /generate-message RESPONSE ---")
-    mock_response = {
-        "should_message": "YES",
-        "message_body": "Thank you for your post!"
-    }
-    print(f"Mock Gemini response: {mock_response}")
-    return jsonify(mock_response)
-    # --- END MOCK ---
-
-    # try:
-    #     full_prompt = build_gemini_prompt(post_content, conditions, prompt_instruction)
+    try:
+        full_prompt = build_gemini_prompt(post_content, main_prompt)
         
-    #     # Call the Gemini API
-    #     response = model.generate_content(full_prompt)
+        response = model.generate_content(full_prompt)
         
-    #     # Clean up and parse the JSON response from the model
-    #     # A simple cleanup for "```json\n{...}\n```" format
-    #     response_text = response.text.strip()
-    #     if response_text.startswith("```json"):
-    #         response_text = response_text[7:]
-    #     if response_text.endswith("```"):
-    #         response_text = response_text[:-3]
+        response_text = response.text.strip().replace("```json", "").replace("```", "")
         
-    #     json_response = json.loads(response_text)
+        json_response = json.loads(response_text)
 
-    #     print(f"Gemini response: {json_response}")
-    #     return jsonify(json_response)
+        print(f"Gemini response: {json_response}")
+        return jsonify(json_response)
 
-    # except Exception as e:
-    #     print(f"Error calling Gemini API or parsing response: {e}")
-    #     # It's good practice to return a structured error
-    #     return jsonify({"status": "error", "message": "Failed to process request with Gemini API.", "details": str(e)}), 500
+    except Exception as e:
+        print(f"Error calling Gemini API or parsing response: {e}")
+        # Return a structured error that the frontend can display
+        return jsonify({
+            "status": "error", 
+            "message": "Failed to process request with Gemini API.", 
+            "user_message": "The AI messaging service failed. This could be due to a network issue or a problem with the API. Please check the backend console for details.",
+            "details": str(e)
+        }), 500
 
 @app.route('/log-user', methods=['POST'])
 def log_user():
@@ -141,9 +106,7 @@ def log_user():
     if not username:
         return jsonify({"status": "error", "message": "Username not provided"}), 400
     try:
-        users_ref = db.collection('messaged_users')
-        users_ref.document(username).set({})
-        print(f"Successfully logged user: {username}")
+        db.collection('messaged_users').document(username).set({})
         return jsonify({"status": "success", "logged_user": username})
     except Exception as e:
         print(f"Error logging user {username}: {e}")
@@ -152,5 +115,4 @@ def log_user():
 # --- Main Entry Point ---
 
 if __name__ == '__main__':
-    # Note: For production, use a proper WSGI server like Gunicorn instead of app.run()
     app.run(debug=True, port=5000)
