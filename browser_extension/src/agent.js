@@ -1,8 +1,14 @@
-```javascript
+
 // agent.js - Combined Scraper and Chatter with Stealth
 
 (function () {
-    console.log("🤖 Agent Loaded v5.3 (Polished): " + window.location.href);
+    if (window.hasAgentLoaded) {
+        console.log("⚠️ Agent already loaded. Skipping re-initialization.");
+        return;
+    }
+    window.hasAgentLoaded = true;
+
+    console.log("🤖 Agent Loaded v5.4 (Singleton + Robust Typing): " + window.location.href);
 
     // --- Stealth Functions ---
     const randomPoint = (min, max) => Math.random() * (max - min) + min;
@@ -46,11 +52,12 @@
         // 1. Clear
         setNativeValue(element, "");
 
-        // 2. Type cleanly (No keydown/keypress to avoid double chars)
+        // 2. Type cleanly (authoritative state to prevent "append" races)
+        let currentString = "";
         for (const char of text) {
             await sleep(randomPoint(20, 50));
-            const val = element.value;
-            setNativeValue(element, val + char);
+            currentString += char;
+            setNativeValue(element, currentString);
         }
 
         // Finalize
@@ -66,7 +73,7 @@
                 if (el) { obs.disconnect(); resolve(el); }
             });
             obs.observe(document.body, { childList: true, subtree: true });
-            setTimeout(() => { obs.disconnect(); reject(new Error(`Timeout: ${ selector } `)); }, timeout);
+            setTimeout(() => { obs.disconnect(); reject(new Error(`Timeout: ${selector} `)); }, timeout);
         });
     }
 
@@ -82,7 +89,7 @@
         if (title) {
             chrome.runtime.sendMessage({
                 command: 'postScraped',
-                data: { postContent: `Title: ${ title } \nBody: ${ body } ` }
+                data: { postContent: `Title: ${title} \nBody: ${body} ` }
             });
         } else {
             // Might need to wait for load?
@@ -180,7 +187,7 @@
                     for (const sel of getSelectors()) {
                         input = findInShadows(sel);
                         if (input) {
-                            console.log(`✅ Found input in Shadow DOM via: ${ sel } `);
+                            console.log(`✅ Found input in Shadow DOM via: ${sel} `);
                             break;
                         }
                     }
@@ -222,17 +229,17 @@
             // Verification (Single Check)
             const currentVal = input.value || input.textContent;
             if (currentVal.trim() !== messageBody.trim()) {
-                 console.warn(`⚠️ Text mismatch.Expected: "${messageBody}", Got: "${currentVal}".Correcting...`);
-                 // Force set if mismatch
-                 const proto = Object.getPrototypeOf(input);
-                 const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-                 if (setter) {
-                     setter.call(input, messageBody);
-                 } else {
-                     input.value = messageBody;
-                 }
-                 input.dispatchEvent(new Event('input', { bubbles: true }));
-                 await sleep(500);
+                console.warn(`⚠️ Text mismatch.Expected: "${messageBody}", Got: "${currentVal}".Correcting...`);
+                // Force set if mismatch
+                const proto = Object.getPrototypeOf(input);
+                const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                if (setter) {
+                    setter.call(input, messageBody);
+                } else {
+                    input.value = messageBody;
+                }
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                await sleep(500);
             }
 
             // --- 3. Send Button Logic (Enter Key Preferred for Speed) ---
@@ -285,10 +292,7 @@
                 return;
             }
 
-                console.log("✅ Message sent (native click)!");
-                chrome.runtime.sendMessage({ command: 'messageSent' });
-                return;
-            }
+
 
             // Attempt 3: Enter Key
             console.warn("⚠️ Attempt 3: Using Enter key fallback...");

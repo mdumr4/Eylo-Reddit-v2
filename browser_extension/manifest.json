@@ -9,7 +9,8 @@
     "storage"
   ],
   "host_permissions": [
-    "*://*.reddit.com/*"
+    "*://*.reddit.com/*",
+    "http://127.0.0.1/*"
   ],
   "action": {
     "default_popup": "popup.html",
