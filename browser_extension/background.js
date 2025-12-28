@@ -1,7 +1,8 @@
 // --- Centralized State Management ---
 const state = {
     isRunning: false,
-    mainPrompt: "",
+    messageBody: null, // Placeholder for generated message
+    token: null, // Supabase Access Token
     usersToProcess: [],
     processedCount: 0,
     messagedCount: 0,
@@ -29,6 +30,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         'getState': () => sendResponse(state),
         'scrapedData': handleScrapedData,
         'postScraped': handlePostScraped,
+        'agentRequestNavigation': handleAgentRequestNavigation,
         'messagingError': handleMessagingError,
         'messageSent': handleMessageSent
     };
@@ -45,7 +47,9 @@ function handleStart(message) {
     addLog("🚀 Starting new run...");
     Object.assign(state, {
         isRunning: true,
+        isRunning: true,
         mainPrompt: message.data.mainPrompt,
+        token: message.data.token,
         usersToProcess: message.data.users || [],
         processedCount: 0,
         messagedCount: 0,
@@ -77,10 +81,10 @@ function handleMessagingError(message, sender) {
     const tabId = sender.tab.id;
     const user = state.tabUserMap.get(tabId);
     const errorMessage = message.data.error || "An unknown UI automation error occurred.";
-    
+
     addLog(`❌ Error processing user ${user?.author || 'unknown'}: ${errorMessage}`);
     state.error = `Error on user ${user?.author}: ${errorMessage}`;
-    
+
     if (user) {
         if (!state.failedUsers.some(u => u.author === user.author)) {
             state.failedUsers.push(user);
@@ -102,9 +106,12 @@ async function handlePostScraped(message, sender) {
     addLog(`🧠 Analyzing post by ${user.author}...`);
 
     try {
-        const response = await fetch('http://127.0.0.1:5000/generate-message', {
+        const response = await fetch('http://127.0.0.1:5000/api/generate', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
             body: JSON.stringify({
                 post_content: message.data.postContent,
                 main_prompt: state.mainPrompt
@@ -115,13 +122,13 @@ async function handlePostScraped(message, sender) {
             const errorBody = await response.json().catch(() => ({ message: "Could not parse error response." }));
             throw new Error(errorBody.user_message || `Backend responded with status ${response.status}`);
         }
-        const result = await response.json();
-
         addLog(`🤖 AI decision for ${user.author}: ${result.should_message}`);
 
         if (result.should_message === "YES") {
-            addLog(`👍 AI approved. Preparing to message ${user.author}.`);
-            chrome.tabs.sendMessage(tabId, { command: 'sendMessage', data: result });
+            addLog(`👍 AI approved. Navigating to ${user.author}'s profile...`);
+            // Tell agent to navigate (it finds the link)
+            state.messageBody = result.message_body; // Store message for next step
+            chrome.tabs.sendMessage(tabId, { command: 'navigateProfile' });
         } else {
             state.skippedCount++;
             state.processedCount++;
@@ -144,6 +151,30 @@ async function handlePostScraped(message, sender) {
     }
 }
 
+async function handleAgentRequestNavigation(message, sender) {
+    const tabId = sender.tab.id;
+    const url = message.data.url;
+
+    // Update Tab URL
+    await chrome.tabs.update(tabId, { url: url });
+
+    // Wait for load
+    await waitForTabLoad(tabId);
+
+    // Inject Agent Again (New Context)
+    await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        files: ['src/agent.js']
+    });
+
+    // Command to Chat
+    addLog(`💬 Opening chat with ${state.tabUserMap.get(tabId)?.author}...`);
+    chrome.tabs.sendMessage(tabId, {
+        command: 'doChat',
+        data: { messageBody: state.messageBody }
+    });
+}
+
 async function handleMessageSent(message, sender) {
     const tabId = sender.tab.id;
     const user = state.tabUserMap.get(tabId);
@@ -154,10 +185,13 @@ async function handleMessageSent(message, sender) {
     state.processedCount++;
 
     try {
-        await fetch('http://127.0.0.1:5000/log-user', {
+        await fetch('http://127.0.0.1:5000/api/log', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: user.author }),
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({ username: user.author, subreddit: user.subreddit || 'unknown' }),
         });
         addLog(`📝 Successfully logged ${user.author} to database.`);
     } catch (error) {
@@ -207,18 +241,21 @@ async function filterUsers(scrapedPosts) {
     if (!state.isRunning) return;
     const authors = scrapedPosts.map(post => post.author);
     const uniqueAuthors = [...new Set(authors)];
-    
+
     addLog(`Found ${uniqueAuthors.length} unique authors. Checking against database...`);
     try {
-        const response = await fetch('http://127.0.0.1:5000/check-users', {
+        const response = await fetch('http://127.0.0.1:5000/api/check-users', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
             body: JSON.stringify({ usernames: uniqueAuthors }),
         });
         if (!response.ok) throw new Error(`Backend responded with status: ${response.status}`);
         const result = await response.json();
         const newAuthors = new Set(result.new_users);
-        
+
         const uniquePosts = [];
         const seenAuthors = new Set();
         for (const post of scrapedPosts) {
@@ -251,12 +288,12 @@ async function processUsers(users) {
         try {
             tab = await chrome.tabs.create({ url: user.postUrl, active: false });
             state.tabUserMap.set(tab.id, user);
-            
+
             await waitForTabLoad(tab.id);
-            
+
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
-                files: ['post_handler.js']
+                files: ['src/agent.js']
             });
 
         } catch (error) {
@@ -272,7 +309,7 @@ async function processUsers(users) {
                 state.tabUserMap.delete(tab.id);
             }
         }
-        
+
         const randomDelay = Math.random() * (15000 - 5000) + 5000; // 5 to 15 seconds
         addLog(`⏳ Waiting for ${Math.round(randomDelay / 1000)}s before next user...`);
         await sleep(randomDelay);

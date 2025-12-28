@@ -36,9 +36,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     logStatus('Error: Main Prompt cannot be empty.');
                     return;
                 }
-                chrome.runtime.sendMessage({
-                    command: 'start',
-                    data: { mainPrompt: mainPrompt }
+
+                // Get Auth Token
+                chrome.storage.local.get(['session'], (result) => {
+                    if (!result.session || !result.session.access_token) {
+                        logStatus('Error: not logged in.');
+                        return;
+                    }
+
+                    chrome.runtime.sendMessage({
+                        command: 'start',
+                        data: {
+                            mainPrompt: mainPrompt,
+                            token: result.session.access_token
+                        }
+                    });
                 });
             }
         });
@@ -49,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!state.isRunning && state.failedUsers.length > 0) {
                 chrome.runtime.sendMessage({
                     command: 'start',
-                    data: { 
+                    data: {
                         mainPrompt: state.mainPrompt,
                         users: state.failedUsers // Pass the list of users to retry
                     }
@@ -103,13 +115,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 retryBtn.textContent = `Retry ${state.failedUsers.length} Failed User(s)`;
             }
         }
-        
+
         // Display error message
         if (state.error) {
             logStatus(`<strong>Error:</strong> ${state.error}`);
         }
     }
-    
+
     function logStatus(message) {
         statusLogEl.innerHTML = message + '<br>' + statusLogEl.innerHTML;
     }

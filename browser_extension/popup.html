@@ -1,122 +1,78 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>reddit-v2</title>
+    <title>Reddit Outreach V2</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            width: 400px;
-            padding: 15px;
-            background-color: #f4f6f8;
-            color: #333;
-        }
-        h3 {
-            text-align: center;
-            color: #e84118;
-            margin-top: 0;
-        }
-        textarea {
-            width: 95%;
-            min-height: 80px;
-            margin-bottom: 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            padding: 8px;
-            font-size: 14px;
-        }
-        button {
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-            transition: background-color 0.2s;
-        }
-        #startStopBtn {
-            background-color: #4CAF50;
-            color: white;
-        }
-        #startStopBtn:hover {
-            background-color: #45a049;
-        }
-        #retryBtn {
-            background-color: #f39c12;
-            color: white;
-            margin-top: 10px;
-            display: none; /* Hidden by default */
-        }
-        #retryBtn:hover {
-            background-color: #e67e22;
-        }
-        #statusLog {
-            margin-top: 10px;
-            padding: 10px;
-            border: 1px solid #ddd;
-            height: 120px;
-            overflow-y: scroll;
-            font-size: 12px;
-            background-color: #fff;
-            border-radius: 4px;
-            white-space: pre-wrap;
-            line-height: 1.5;
-        }
-        label {
-            font-weight: bold;
-            margin-bottom: 5px;
-            display: block;
-        }
-        #progress-container {
-            width: 100%;
-            background-color: #e0e0e0;
-            border-radius: 4px;
-            margin-top: 15px;
-            display: none; /* Hidden by default */
-        }
-        #progress-bar {
-            width: 0%;
-            height: 10px;
-            background-color: #4CAF50;
-            border-radius: 4px;
-            transition: width 0.3s ease-in-out;
-        }
-        #progress-text {
-            font-size: 12px;
-            text-align: center;
-            margin-top: 5px;
-        }
-        #summary {
-            margin-top: 15px;
-            padding: 10px;
-            background-color: #e9ecef;
-            border-radius: 4px;
-            display: none; /* Hidden by default */
-            font-size: 14px;
-        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; width: 320px; padding: 15px; color: #333; }
+        h2 { margin-top: 0; font-size: 18px; color: #2c3e50; }
+
+        /* Screens */
+        #login-screen, #dashboard-screen { display: none; }
+
+        /* Form Elements */
+        input, textarea { width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        textarea { height: 80px; resize: vertical; }
+
+        button { width: 100%; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 5px; }
+        .btn-primary { background-color: #3498db; color: white; }
+        .btn-success { background-color: #2ecc71; color: white; }
+        .btn-danger { background-color: #e74c3c; color: white; }
+        .btn-secondary { background-color: #95a5a6; color: white; }
+
+        button:disabled { opacity: 0.7; cursor: not-allowed; }
+
+        /* Status & Logs */
+        .status-box { background: #f8f9fa; border: 1px solid #e9ecef; padding: 10px; border-radius: 4px; max-height: 150px; overflow-y: auto; font-size: 12px; margin-top: 10px; }
+        .error { color: #e74c3c; font-size: 12px; margin-bottom: 10px; }
+
+        /* Progress */
+        #progress-container { display: none; margin-top: 10px; }
+        #progress-bar-bg { background-color: #eee; height: 10px; border-radius: 5px; overflow: hidden; }
+        #progress-bar { background-color: #2ecc71; height: 100%; width: 0%; transition: width 0.3s; }
+        #progress-text { font-size: 11px; text-align: center; margin-top: 2px; }
     </style>
 </head>
 <body>
-    <h3>Reddit Outreach Agent</h3>
-    
-    <label for="mainPrompt">Main Prompt:</label>
-    <textarea id="mainPrompt" placeholder="Enter the complete system instruction for Gemini here. This should include rules, conditions, and the message generation instructions."></textarea>
 
-    <button id="startStopBtn">Start</button>
-    <button id="retryBtn">Retry Failed</button>
-
-    <div id="progress-container">
-        <div id="progress-bar"></div>
-    </div>
-    <div id="progress-text"></div>
-
-    <div id="summary"></div>
-
-    <label for="statusLog">Status Log:</label>
-    <div id="statusLog">
-        Welcome! Click Start to begin.
+    <!-- LOGIN SCREEN -->
+    <div id="login-screen">
+        <h2>🔐 Login Required</h2>
+        <input type="email" id="email" placeholder="Email" />
+        <input type="password" id="password" placeholder="Password" />
+        <div id="login-error" class="error"></div>
+        <button id="loginBtn" class="btn-primary">Login</button>
+        <p style="font-size: 11px; color: #666; text-align: center;">
+            Please create an account in Supabase manually if you haven't.
+        </p>
     </div>
 
-    <script src="popup.js"></script>
+    <!-- DASHBOARD SCREEN -->
+    <div id="dashboard-screen">
+        <h2>🤖 Reddit Outreach</h2>
+
+        <label for="mainPrompt" style="font-size: 12px; font-weight: bold;">Main Prompt:</label>
+        <textarea id="mainPrompt" placeholder="e.g. You are a student researcher. Validate if the user is a student..."></textarea>
+
+        <button id="startStopBtn" class="btn-success">Start Automation</button>
+        <button id="retryBtn" class="btn-secondary" style="display:none;">Retry Failed</button>
+
+        <div id="progress-container">
+            <div id="progress-bar-bg"><div id="progress-bar"></div></div>
+            <div id="progress-text">Processing: 0/0</div>
+        </div>
+
+        <div class="status-box" id="statusLog">
+            Ready to start.
+        </div>
+
+        <div id="summary" style="margin-top: 10px; font-size: 12px; display: none;"></div>
+
+        <button id="logoutBtn" class="btn-danger" style="margin-top: 15px; font-size: 11px; padding: 5px;">Logout</button>
+    </div>
+
+    <!-- SCRIPTS -->
+    <!-- Note: type="module" allows us to use imports in popup.js and auth.js -->
+    <script type="module" src="src/auth.js"></script>
+    <script type="module" src="popup.js"></script>
 </body>
 </html>
