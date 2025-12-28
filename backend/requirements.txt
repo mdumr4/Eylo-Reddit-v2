@@ -1,5 +1,6 @@
 Flask
-google-cloud-firestore
+supabase
 google-generativeai
 python-dotenv
 flask-cors
+gunicorn
