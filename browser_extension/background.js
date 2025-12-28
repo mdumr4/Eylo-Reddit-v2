@@ -122,6 +122,8 @@ async function handlePostScraped(message, sender) {
             const errorBody = await response.json().catch(() => ({ message: "Could not parse error response." }));
             throw new Error(errorBody.user_message || `Backend responded with status ${response.status}`);
         }
+        const result = await response.json();
+
         addLog(`🤖 AI decision for ${user.author}: ${result.should_message}`);
 
         if (result.should_message === "YES") {
