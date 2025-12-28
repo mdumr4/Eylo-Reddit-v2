@@ -1,7 +1,8 @@
+```javascript
 // agent.js - Combined Scraper and Chatter with Stealth
 
 (function () {
-    console.log("🤖 Agent Loaded: " + window.location.href);
+    console.log("🤖 Agent Loaded v5.3 (Polished): " + window.location.href);
 
     // --- Stealth Functions ---
     const randomPoint = (min, max) => Math.random() * (max - min) + min;
@@ -13,8 +14,9 @@
         await sleep(randomPoint(300, 500));
 
         const rect = element.getBoundingClientRect();
-        const x = rect.left + rect.width / 2 + randomPoint(-5, 5);
-        const y = rect.top + rect.height / 2 + randomPoint(-5, 5);
+        // Slightly tighter click radius to avoid missing small buttons
+        const x = rect.left + rect.width / 2 + randomPoint(-2, 2);
+        const y = rect.top + rect.height / 2 + randomPoint(-2, 2);
 
         const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window };
         element.dispatchEvent(new MouseEvent('mouseover', opts));
@@ -27,24 +29,31 @@
 
     async function humanType(element, text) {
         element.focus();
-        // Clear logic for textarea if needed
-        element.value = "";
 
+        // Helper: React-safe value setter
+        const setNativeValue = (el, value) => {
+            const proto = Object.getPrototypeOf(el);
+            const valueProp = Object.getOwnPropertyDescriptor(proto, 'value');
+            if (valueProp && valueProp.set) {
+                valueProp.set.call(el, value);
+            } else {
+                el.value = value;
+            }
+            // Vital for React to see the change
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+
+        // 1. Clear
+        setNativeValue(element, "");
+
+        // 2. Type cleanly (No keydown/keypress to avoid double chars)
         for (const char of text) {
-            await sleep(randomPoint(30, 80));
-            element.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-            element.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
-
-            // Standard generic input
-            const start = element.selectionStart;
-            const end = element.selectionEnd;
+            await sleep(randomPoint(20, 50));
             const val = element.value;
-            element.value = val.substring(0, start) + char + val.substring(end);
-            element.selectionStart = element.selectionEnd = start + 1;
-
-            element.dispatchEvent(new InputEvent('input', { data: char, bubbles: true, inputType: 'insertText' }));
-            element.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+            setNativeValue(element, val + char);
         }
+
+        // Finalize
         element.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
@@ -57,7 +66,7 @@
                 if (el) { obs.disconnect(); resolve(el); }
             });
             obs.observe(document.body, { childList: true, subtree: true });
-            setTimeout(() => { obs.disconnect(); reject(new Error(`Timeout: ${selector}`)); }, timeout);
+            setTimeout(() => { obs.disconnect(); reject(new Error(`Timeout: ${ selector } `)); }, timeout);
         });
     }
 
@@ -73,7 +82,7 @@
         if (title) {
             chrome.runtime.sendMessage({
                 command: 'postScraped',
-                data: { postContent: `Title: ${title}\nBody: ${body}` }
+                data: { postContent: `Title: ${ title } \nBody: ${ body } ` }
             });
         } else {
             // Might need to wait for load?
@@ -88,67 +97,236 @@
 
     async function navigateToProfile() {
         try {
-            const authorLink = await waitForElement('a[href^="/user/"], a[href^="/u/"]');
-            const href = authorLink.getAttribute('href');
-            // Send back to background to handle the navigation (reliable)
-            chrome.runtime.sendMessage({ command: 'agentRequestNavigation', data: { url: `https://www.reddit.com${href}` } });
+            console.log("Agent: Finding Author Link...");
+            const authorLink = await waitForElement('a[href^="/user/"], a[href^="/u/"], span[itemprop="author"] a, shreddit-post a[href^="/user/"]');
+
+            console.log("Agent: Clicking Author Link (Stealth)...");
+            await humanClick(authorLink);
+
+            console.log("Agent: Clicked. Signaling Background to wait for load...");
+            // Signal background that we clicked and it should expect a load
+            chrome.runtime.sendMessage({ command: 'agentRequestNavigation', data: { url: 'clicked' } });
+
         } catch (e) {
             chrome.runtime.sendMessage({ command: 'messagingError', data: { error: e.message + " (Finding Author)" } });
         }
     }
 
+    // NEW: Helper for check if element is editable
+    function isEditable(el) {
+        if (!el) return false;
+        return el.tagName === 'TEXTAREA' ||
+            el.tagName === 'INPUT' ||
+            el.getAttribute('contenteditable') === 'true' ||
+            el.getAttribute('role') === 'textbox';
+    }
+
     async function sendChatMessage(messageBody) {
         try {
-            console.log("Looking for Chat button...");
-            // Heuristic for Chat Button
-            const buttons = Array.from(document.querySelectorAll('button, a'));
-            const startChatBtn = buttons.find(b => {
-                const t = b.textContent.toLowerCase();
-                return t.includes('chat') && !t.includes('settings') && !t.includes('general');
-            });
+            console.log("🔍 Looking for Chat button...");
 
-            if (!startChatBtn) {
-                // Try looking for the icon specific test id
-                const iconBtn = document.querySelector('a[data-testid="private-chat-button"]');
-                if (iconBtn) {
-                    await humanClick(iconBtn);
-                } else {
-                    throw new Error("Chat button not found");
+            // Specific selector for Reddit profile chat button
+            const startChatBtn =
+                document.querySelector('a[href*="chat.reddit.com/user/"]') ||
+                document.querySelector('[aria-label*="chat"]') ||
+                document.querySelector('button[aria-label*="chat"]');
+
+            if (!startChatBtn) throw new Error("Start Chat button not found");
+
+            console.log("✅ Found Chat button");
+            await humanClick(startChatBtn);
+            await sleep(3500); // Increased wait for modal
+
+            // --- 1. Robust Input Finding (Shadow DOM Compatible) ---
+            console.log("🔍 Looking for message input (Deep Search)...");
+
+            // Helper to recursively search shadow DOMs
+            const findInShadows = (selector, root = document.body) => {
+                // Check root first
+                let el = root.querySelector(selector);
+                if (el) return el;
+
+                // Recursively check all children with shadowRoots
+                const elements = root.querySelectorAll('*');
+                for (const elem of elements) {
+                    if (elem.shadowRoot) {
+                        el = findInShadows(selector, elem.shadowRoot);
+                        if (el) return el;
+                    }
                 }
-            } else {
-                await humanClick(startChatBtn);
+                return null;
+            };
+
+            const getSelectors = () => [
+                'textarea[aria-label="Write message"]',
+                'textarea[placeholder="Message"]',
+                'div[contenteditable="true"][role="textbox"]',
+                'faceplate-textarea-input textarea', // Common Reddit component
+                'shreddit-composer textarea'
+            ];
+
+            let input = null;
+            let retries = 0;
+
+            while (!input && retries < 5) {
+                // Try global search first
+                for (const sel of getSelectors()) {
+                    input = document.querySelector(sel);
+                    if (input) break;
+                }
+
+                // Try Shadow DOM search logic if global failed
+                if (!input) {
+                    for (const sel of getSelectors()) {
+                        input = findInShadows(sel);
+                        if (input) {
+                            console.log(`✅ Found input in Shadow DOM via: ${ sel } `);
+                            break;
+                        }
+                    }
+                }
+
+                // Fallback: Check for ANY visible textarea if specific ones fail
+                if (!input) {
+                    const allTextareas = Array.from(document.querySelectorAll('textarea'));
+                    input = allTextareas.find(t => t.offsetParent !== null && t.clientHeight > 0);
+                    if (input) console.log("⚠️ Fallback: Found a generic visible textarea.");
+                }
+
+                if (!input) {
+                    await sleep(1000);
+                    retries++;
+                }
             }
 
-            console.log("Waiting for Chat Input...");
-            const input = await waitForElement('[contenteditable="true"], textarea');
+            if (!input) {
+                // Fallback: activeElement check if it looks like an input
+                if (isEditable(document.activeElement)) {
+                    input = document.activeElement;
+                    console.log("⚠️ Used activeElement fallback:", input.tagName, input.className);
+                } else {
+                    // DIAGNOSTIC LOGGING
+                    console.error("❌ Debug: Input search failed (v5.3).");
+                    throw new Error("Could not find chat input even with Deep Search. Check console.");
+                }
+            }
 
+            console.log("✅ Found input:", input.tagName);
+
+            // --- 2. Polish Typing (Single Attempt, React Clean) ---
+            input.focus();
+            input.click(); // Ensure focus
             await humanType(input, messageBody);
-            await sleep(1000);
+            await sleep(500);
 
-            // Find Send Button (icon usually)
-            const sendBtn = document.querySelector('button[aria-label="Send"]');
-            if (sendBtn) {
+            // Verification (Single Check)
+            const currentVal = input.value || input.textContent;
+            if (currentVal.trim() !== messageBody.trim()) {
+                 console.warn(`⚠️ Text mismatch.Expected: "${messageBody}", Got: "${currentVal}".Correcting...`);
+                 // Force set if mismatch
+                 const proto = Object.getPrototypeOf(input);
+                 const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                 if (setter) {
+                     setter.call(input, messageBody);
+                 } else {
+                     input.value = messageBody;
+                 }
+                 input.dispatchEvent(new Event('input', { bubbles: true }));
+                 await sleep(500);
+            }
+
+            // --- 3. Send Button Logic (Enter Key Preferred for Speed) ---
+            console.log("🔍 Looking for Send button...");
+
+            const findSendResult = () => {
+                const buttons = Array.from(document.querySelectorAll('button'));
+                return buttons.find(b => {
+                    const label = (b.getAttribute('aria-label') || "").toLowerCase();
+                    const type = (b.getAttribute('type') || "").toLowerCase();
+
+                    if (label === 'send message') return true;
+                    if (label.includes('send') && !label.includes('upload')) return true;
+                    // Paper plane icon check
+                    if (b.querySelector('svg path[d^="M2.01"]') || b.innerHTML.includes('path')) {
+                        return !label.includes('menu') && !label.includes('overflow');
+                    }
+                    return false;
+                });
+            };
+
+            let sendBtn = findSendResult();
+
+            // Wait brief moment for enable
+            let k = 0;
+            while ((!sendBtn || sendBtn.disabled) && k < 5) {
+                console.log("⏳ Waiting for send button to enable...");
+                input.dispatchEvent(new Event('input', { bubbles: true })); // Pulse the input
+                await sleep(500);
+                sendBtn = findSendResult();
+                k++;
+            }
+
+            const isMessageSent = () => {
+                const val = input.value || input.textContent;
+                return val.trim() === "";
+            };
+
+            // Attempt 1: Human Click
+            if (sendBtn && !sendBtn.disabled) {
+                console.log("✅ Attempt 1: Clicking Send button (Human)...");
                 await humanClick(sendBtn);
-                await sleep(2000);
+                await sleep(1500);
+            }
+
+            // Fast Verify & Fallback
+            if (isMessageSent()) {
+                console.log("✅ Message sent successfully!");
+                chrome.runtime.sendMessage({ command: 'messageSent' });
+                return;
+            }
+
+                console.log("✅ Message sent (native click)!");
+                chrome.runtime.sendMessage({ command: 'messageSent' });
+                return;
+            }
+
+            // Attempt 3: Enter Key
+            console.warn("⚠️ Attempt 3: Using Enter key fallback...");
+            input.focus();
+            input.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Enter', code: 'Enter', keyCode: 13,
+                bubbles: true, cancelable: true
+            }));
+            await sleep(1500);
+
+            // Verify 3 (Final)
+            if (isMessageSent()) {
+                console.log("✅ Message sent (Enter key)!");
                 chrome.runtime.sendMessage({ command: 'messageSent' });
             } else {
-                throw new Error("Send button not found");
+                throw new Error("❌ Failed to send message. Input field did not clear.");
             }
 
-        } catch (e) {
-            chrome.runtime.sendMessage({ command: 'messagingError', data: { error: e.message } });
+        } catch (error) {
+            console.error("❌ Error:", error.message);
+            chrome.runtime.sendMessage({
+                command: 'messagingError',
+                data: { error: error.message }
+            });
         }
     }
 
     // --- Controller ---
 
-    // If we were just injected, what should we do?
-    // We check the URL context.
+    // Prioritize URL checking to avoid "Scraping on Profile" loop
+    const currentPath = window.location.pathname;
 
-    if (document.querySelector('shreddit-post') || window.location.pathname.includes('/comments/')) {
+    if (currentPath.includes('/user/') || currentPath.includes('/u/')) {
+        console.log("Agent: On Profile Page. Waiting for 'doChat' command...");
+        // Do nothing, just listen.
+    } else if (currentPath.includes('/comments/') || document.querySelector('shreddit-post')) {
+        console.log("Agent: On Post Page. Scraping...");
         scrape();
-    } else if (window.location.pathname.includes('/user/') || window.location.pathname.includes('/u/')) {
-        // Do nothing, wait for 'doChat' command
     }
 
     // --- Message Listener ---

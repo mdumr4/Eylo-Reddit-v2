@@ -87,11 +87,11 @@ document.addEventListener('DOMContentLoaded', () => {
         statusLogEl.innerHTML = state.log.join('<br>');
 
         // Update progress bar and text
-        if (state.isRunning && state.usersToProcess.length > 0) {
+        if (state.isRunning && state.totalUsers > 0) {
             progressContainer.style.display = 'block';
-            const progressPercentage = (state.processedCount / state.usersToProcess.length) * 100;
+            const progressPercentage = (state.processedCount / state.totalUsers) * 100;
             progressBar.style.width = `${progressPercentage}%`;
-            progressText.textContent = `Processed: ${state.processedCount} / ${state.usersToProcess.length}`;
+            progressText.textContent = `Processed: ${state.processedCount} / ${state.totalUsers}`;
         } else {
             progressContainer.style.display = 'none';
             progressText.textContent = '';

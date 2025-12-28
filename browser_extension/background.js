@@ -1,24 +1,26 @@
 // --- Centralized State Management ---
 const state = {
     isRunning: false,
-    messageBody: null, // Placeholder for generated message
-    token: null, // Supabase Access Token
-    usersToProcess: [],
+    messageBody: null,
+    token: null,
+    queue: [], // Array of { user, retryCount }
+    activeTabId: null, // The SINGLE active tab
     processedCount: 0,
     messagedCount: 0,
     skippedCount: 0,
+    totalUsers: 0, // Track total for UI progress bar
     failedUsers: [],
     log: ["Welcome! Click Start to begin."],
     error: null,
-    tabUserMap: new Map() // Maps tab IDs to the user object being processed
+    tabUserMap: new Map() // Still needed for message correlation
 };
 
 // Function to add a log message
 function addLog(message) {
-    console.log(message); // Also log to the background console for debugging
-    state.log.unshift(message); // Add to the beginning of the array
+    console.log(message);
+    state.log.unshift(message);
     if (state.log.length > 100) {
-        state.log.pop(); // Keep the log from growing indefinitely
+        state.log.pop();
     }
 }
 
@@ -28,29 +30,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         'start': handleStart,
         'stop': handleStop,
         'getState': () => sendResponse(state),
-        'scrapedData': handleScrapedData,
-        'postScraped': handlePostScraped,
         'agentRequestNavigation': handleAgentRequestNavigation,
-        'messagingError': handleMessagingError,
-        'messageSent': handleMessageSent
+        'messagingError': handleMessagingError, // Maps to Workflow Error
+        'messageSent': handleMessageSent,      // Maps to Workflow Complete
+        'postScraped': handlePostScraped,      // Intermediate Step
+        'workflowSkip': handleWorkflowSkip,    // Explicit Skip
+        'scrapedData': handleScrapedData       // Initial Scan Data
     };
 
     const commandHandler = commands[message.command];
     if (commandHandler) {
+        // Return true to indicate async response might be needed
         Promise.resolve(commandHandler(message, sender)).then(sendResponse);
         return true;
     }
 });
 
 // --- Command Handlers ---
+
 function handleStart(message) {
     addLog("🚀 Starting new run...");
     Object.assign(state, {
         isRunning: true,
-        isRunning: true,
         mainPrompt: message.data.mainPrompt,
         token: message.data.token,
-        usersToProcess: message.data.users || [],
+        queue: [],
         processedCount: 0,
         messagedCount: 0,
         skippedCount: 0,
@@ -59,9 +63,11 @@ function handleStart(message) {
         error: null
     });
 
-    if (state.usersToProcess.length > 0) {
-        addLog(`🔁 Starting retry for ${state.usersToProcess.length} failed users.`);
-        processUsers(state.usersToProcess);
+    const users = message.data.users || [];
+    if (users.length > 0) {
+        state.totalUsers = users.length; // Set total for UI
+        addLog(`🔁 Queuing retry for ${users.length} users.`);
+        processUsers(users);
     } else {
         addLog("🔍 Kicking off automation to find new users...");
         startAutomation();
@@ -69,40 +75,126 @@ function handleStart(message) {
 }
 
 function handleStop() {
-    addLog("🛑 Stop command received. Automation will halt after the current task.");
+    addLog("🛑 Stop command received. Halting soon.");
     state.isRunning = false;
 }
 
-function handleScrapedData(message) {
-    filterUsers(message.data);
+// --- Queue System (The Core Loop) ---
+
+// We use an internal variable to resolve the Promise of the current user
+let currentUserResolver = null;
+let currentUserRejecter = null;
+
+function waitForTabLoad(tabId) {
+    return new Promise(resolve => {
+        chrome.tabs.get(tabId, (tab) => {
+            if (chrome.runtime.lastError || !tab) return resolve(); // Just continue if error
+            if (tab.status === 'complete') return resolve();
+
+            const listener = (updatedTabId, changeInfo) => {
+                if (updatedTabId === tabId && changeInfo.status === 'complete') {
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    resolve();
+                }
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+        });
+    });
 }
 
-function handleMessagingError(message, sender) {
-    const tabId = sender.tab.id;
-    const user = state.tabUserMap.get(tabId);
-    const errorMessage = message.data.error || "An unknown UI automation error occurred.";
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
-    addLog(`❌ Error processing user ${user?.author || 'unknown'}: ${errorMessage}`);
-    state.error = `Error on user ${user?.author}: ${errorMessage}`;
+async function processUsers(users) {
+    // 1. Initialize Queue
+    state.queue = users.map(u => ({ user: u, retryCount: 0 }));
+    addLog(`📨 Queue initialized with ${state.queue.length} users.`);
 
-    if (user) {
-        if (!state.failedUsers.some(u => u.author === user.author)) {
-            state.failedUsers.push(user);
+    // 2. Start Loop
+    while (state.queue.length > 0 && state.isRunning) {
+        const item = state.queue.shift();
+        const { user, retryCount } = item;
+
+        addLog(`--------------------------------------------------`);
+        addLog(`👉 Processing (${state.processedCount + 1}): ${user.author} (Attempt ${retryCount + 1})`);
+
+        try {
+            // A. Manage Tab
+            if (state.activeTabId) {
+                try {
+                    // Check if tab exists
+                    await chrome.tabs.get(state.activeTabId);
+                    await chrome.tabs.update(state.activeTabId, { url: user.postUrl });
+                } catch (e) {
+                    const tab = await chrome.tabs.create({ url: user.postUrl, active: false });
+                    state.activeTabId = tab.id;
+                }
+            } else {
+                const tab = await chrome.tabs.create({ url: user.postUrl, active: false });
+                state.activeTabId = tab.id;
+            }
+
+            // Map tab to user so handlers know who we are talking about
+            state.tabUserMap.set(state.activeTabId, user);
+
+            await waitForTabLoad(state.activeTabId);
+
+            // B. Inject Agent (Starts the workflow)
+            await chrome.scripting.executeScript({
+                target: { tabId: state.activeTabId },
+                files: ['src/agent.js']
+            });
+
+            // C. WAIT for workflow result
+            // This promise will be resolved by handleWorkflowComplete/Error/Skip
+            const result = await new Promise((resolve, reject) => {
+                currentUserResolver = resolve;
+                currentUserRejecter = reject;
+
+                // Timeout (2 mins max per user)
+                setTimeout(() => {
+                    reject(new Error("Timeout waiting for user completion"));
+                }, 120000);
+            });
+
+            addLog(`✅ Work for ${user.author} finished: ${result}`);
+            state.processedCount++;
+
+        } catch (error) {
+            addLog(`⚠️ Attempt ${retryCount + 1} failed for ${user.author}: ${error.message}`);
+
+            if (retryCount < 3) {
+                addLog(`🔄 Re-queueing ${user.author} at the end.`);
+                state.queue.push({ user, retryCount: retryCount + 1 });
+            } else {
+                addLog(`❌ Max retries reached for ${user.author}. Dropping.`);
+                state.failedUsers.push(user);
+            }
+        } finally {
+            currentUserResolver = null;
+            currentUserRejecter = null;
         }
-    }
-    state.processedCount++;
 
-    if (tabId) {
-        chrome.tabs.remove(tabId);
-        state.tabUserMap.delete(tabId);
+        // Random Delay
+        const delay = Math.random() * (20000 - 10000) + 10000;
+        addLog(`⏳ Waiting ${Math.round(delay / 1000)}s before next...`);
+        await sleep(delay);
+    }
+
+    if (state.isRunning) {
+        addLog("✅ All queue items processed.");
+        state.isRunning = false;
     }
 }
 
-async function handlePostScraped(message, sender) {
-    const tabId = sender.tab.id;
-    const user = state.tabUserMap.get(tabId);
-    if (!user) return;
+// --- Handler Logic Bridge ---
 
+// 1. Post Scraped -> Call API -> Decide
+async function handlePostScraped(message, sender) {
+    if (sender.tab.id !== state.activeTabId) return; // Ignore stale tabs
+
+    const user = state.tabUserMap.get(sender.tab.id);
     addLog(`🧠 Analyzing post by ${user.author}...`);
 
     try {
@@ -118,73 +210,60 @@ async function handlePostScraped(message, sender) {
             }),
         });
 
-        if (!response.ok) {
-            const errorBody = await response.json().catch(() => ({ message: "Could not parse error response." }));
-            throw new Error(errorBody.user_message || `Backend responded with status ${response.status}`);
+        if (response.status === 429) {
+            // Signal Retry to the main loop?
+            // Better: Just throw error, Main Loop catches -> Re-queues.
+            throw new Error("Rate Limit (429)");
         }
-        const result = await response.json();
 
-        addLog(`🤖 AI decision for ${user.author}: ${result.should_message}`);
+        const result = await response.json();
+        addLog(`🤖 AI Decision: ${result.should_message}`); // LOGGING BACKEND DECISION
 
         if (result.should_message === "YES") {
-            addLog(`👍 AI approved. Navigating to ${user.author}'s profile...`);
-            // Tell agent to navigate (it finds the link)
-            state.messageBody = result.message_body; // Store message for next step
-            chrome.tabs.sendMessage(tabId, { command: 'navigateProfile' });
+            addLog(`👍 Decision YES. Navigating to profile...`);
+            state.messageBody = result.message_body;
+
+            // Tell Agent to Click Link
+            chrome.tabs.sendMessage(state.activeTabId, { command: 'navigateProfile' });
+            // Now we wait for 'agentRequestNavigation' or 'workflowError'
         } else {
-            state.skippedCount++;
-            state.processedCount++;
-            addLog(`👎 AI rejected. Skipping user ${user.author}.`);
-            chrome.tabs.remove(tabId);
-            state.tabUserMap.delete(tabId);
+            addLog(`👎 Decision NO.`);
+            resolveCurrent("Skipped (AI No)");
         }
 
-    } catch (error) {
-        addLog(`❌ Error during AI processing for ${user.author}: ${error.message}`);
-        state.error = `AI API error on user ${user.author}. Please check backend logs.`;
-        if (user) {
-            if (!state.failedUsers.some(u => u.author === user.author)) {
-                state.failedUsers.push(user);
-            }
-        }
-        state.processedCount++;
-        chrome.tabs.remove(tabId);
-        state.tabUserMap.delete(tabId);
+    } catch (e) {
+        rejectCurrent(e);
     }
 }
 
+// 2. Agent clicked link -> Page Loading... -> Re-Inject
 async function handleAgentRequestNavigation(message, sender) {
-    const tabId = sender.tab.id;
-    const url = message.data.url;
+    if (sender.tab.id !== state.activeTabId) return;
 
-    // Update Tab URL
-    await chrome.tabs.update(tabId, { url: url });
+    addLog(`🖱️ Agent navigated. Waiting for load...`);
+    await waitForTabLoad(state.activeTabId);
 
-    // Wait for load
-    await waitForTabLoad(tabId);
-
-    // Inject Agent Again (New Context)
+    // Inject again
     await chrome.scripting.executeScript({
-        target: { tabId: tabId },
+        target: { tabId: state.activeTabId },
         files: ['src/agent.js']
     });
 
-    // Command to Chat
-    addLog(`💬 Opening chat with ${state.tabUserMap.get(tabId)?.author}...`);
-    chrome.tabs.sendMessage(tabId, {
+    // Start Chat
+    addLog(`💬 Opening chat...`);
+    chrome.tabs.sendMessage(state.activeTabId, {
         command: 'doChat',
         data: { messageBody: state.messageBody }
     });
 }
 
+// 3. Message Sent -> Log -> Success
 async function handleMessageSent(message, sender) {
-    const tabId = sender.tab.id;
-    const user = state.tabUserMap.get(tabId);
-    if (!user) return;
+    if (sender.tab.id !== state.activeTabId) return;
+    const user = state.tabUserMap.get(state.activeTabId);
 
-    addLog(`✅ Message sent to ${user.author}.`);
+    addLog(`✅ Message sent! Logging...`);
     state.messagedCount++;
-    state.processedCount++;
 
     try {
         await fetch('http://127.0.0.1:5000/api/log', {
@@ -195,56 +274,67 @@ async function handleMessageSent(message, sender) {
             },
             body: JSON.stringify({ username: user.author, subreddit: user.subreddit || 'unknown' }),
         });
-        addLog(`📝 Successfully logged ${user.author} to database.`);
-    } catch (error) {
-        addLog(`⚠️ Failed to log user ${user.author}: ${error.message}`);
-    } finally {
-        chrome.tabs.remove(tabId);
-        state.tabUserMap.delete(tabId);
+        resolveCurrent("Success (Sent & Logged)");
+    } catch (e) {
+        // Even if logging fails, message was sent.
+        resolveCurrent("Success (Sent, Log Failed)");
     }
 }
 
-// --- Workflow Functions ---
-function waitForTabLoad(tabId) {
-    return new Promise(resolve => {
-        const listener = (updatedTabId, changeInfo) => {
-            if (updatedTabId === tabId && changeInfo.status === 'complete') {
-                chrome.tabs.onUpdated.removeListener(listener);
-                resolve();
-            }
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-    });
+function handleMessagingError(message, sender) {
+    addLog(`❌ Client Error: ${message.data.error}`);
+    rejectCurrent(new Error(message.data.error));
 }
 
+function handleWorkflowSkip() {
+    resolveCurrent("Skipped (Agent Signal)");
+}
+
+// --- Helper to resolve main loop ---
+function resolveCurrent(msg) {
+    if (currentUserResolver) currentUserResolver(msg);
+}
+function rejectCurrent(err) {
+    if (currentUserRejecter) currentUserRejecter(err);
+}
+
+// --- Initial Scraper ---
 async function startAutomation() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
     if (!tab || !tab.url.includes('reddit.com')) {
-        addLog("❌ Error: Not on a Reddit page. Stopping automation.");
+        addLog("❌ Not on Reddit.");
         state.isRunning = false;
         return;
     }
-
-    addLog(`🔎 Scanning subreddit: ${tab.url.split('?')[0]}`);
+    // Inject initial scraper (content_script.js - need to create this if missing or use inline)
+    // Assuming content_script.js exists or we reuse agent?
+    // Agent is for single user. Initial scan needs a scanner.
+    // Let's reuse 'content_script.js' logic but ensure it exists?
+    // User didn't delete content_script.js.
 
     try {
         await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             files: ['content_script.js']
         });
-    } catch (error) {
-        addLog(`❌ Error: Failed to inject content script: ${error.message}`);
+    } catch (e) {
+        addLog(`❌ Inject Error: ${e.message}`);
         state.isRunning = false;
     }
 }
 
+// Handlers for initial scan result
+function handleScrapedData(message) {
+    // This comes from content_script.js
+    // Filter users then call processUsers
+    filterUsers(message.data);
+}
+
 async function filterUsers(scrapedPosts) {
     if (!state.isRunning) return;
-    const authors = scrapedPosts.map(post => post.author);
-    const uniqueAuthors = [...new Set(authors)];
+    const authors = [...new Set(scrapedPosts.map(p => p.author))];
+    addLog(`Found ${authors.length} authors. Checking DB...`);
 
-    addLog(`Found ${uniqueAuthors.length} unique authors. Checking against database...`);
     try {
         const response = await fetch('http://127.0.0.1:5000/api/check-users', {
             method: 'POST',
@@ -252,75 +342,32 @@ async function filterUsers(scrapedPosts) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${state.token}`
             },
-            body: JSON.stringify({ usernames: uniqueAuthors }),
+            body: JSON.stringify({ usernames: authors }),
         });
-        if (!response.ok) throw new Error(`Backend responded with status: ${response.status}`);
         const result = await response.json();
-        const newAuthors = new Set(result.new_users);
 
+        // Match posts to new authors
         const uniquePosts = [];
-        const seenAuthors = new Set();
-        for (const post of scrapedPosts) {
-            if (newAuthors.has(post.author) && !seenAuthors.has(post.author)) {
-                uniquePosts.push(post);
-                seenAuthors.add(post.author);
+        const seen = new Set();
+        const newPool = new Set(result.new_users);
+
+        for (const p of scrapedPosts) {
+            if (newPool.has(p.author) && !seen.has(p.author)) {
+                uniquePosts.push(p);
+                seen.add(p.author);
             }
         }
 
-        state.usersToProcess = uniquePosts;
-        addLog(`Found ${state.usersToProcess.length} new users to process.`);
-        processUsers(state.usersToProcess);
-    } catch (error) {
-        addLog(`❌ Error communicating with the backend: ${error.message}`);
+        if (uniquePosts.length === 0) {
+            addLog("No new users found.");
+            state.isRunning = false;
+        } else {
+            state.totalUsers = uniquePosts.length; // Set total for UI
+            processUsers(uniquePosts);
+        }
+
+    } catch (e) {
+        addLog(`❌ Check Failed: ${e.message}`);
         state.isRunning = false;
     }
 }
-
-async function processUsers(users) {
-    addLog(`📨 Starting to process ${users.length} users one by one.`);
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-    for (const user of users) {
-        if (!state.isRunning) {
-            addLog("🛑 Automation stopped by user.");
-            break;
-        }
-        addLog(`(${state.processedCount + 1}/${state.usersToProcess.length}) Processing user: ${user.author}...`);
-        let tab = null;
-        try {
-            tab = await chrome.tabs.create({ url: user.postUrl, active: false });
-            state.tabUserMap.set(tab.id, user);
-
-            await waitForTabLoad(tab.id);
-
-            await chrome.scripting.executeScript({
-                target: { tabId: tab.id },
-                files: ['src/agent.js']
-            });
-
-        } catch (error) {
-            addLog(`❌ Critical error creating tab for ${user.author}: ${error.message}`);
-            if (user) {
-                if (!state.failedUsers.some(u => u.author === user.author)) {
-                    state.failedUsers.push(user);
-                }
-            }
-            state.processedCount++;
-            if (tab) {
-                chrome.tabs.remove(tab.id);
-                state.tabUserMap.delete(tab.id);
-            }
-        }
-
-        const randomDelay = Math.random() * (15000 - 5000) + 5000; // 5 to 15 seconds
-        addLog(`⏳ Waiting for ${Math.round(randomDelay / 1000)}s before next user...`);
-        await sleep(randomDelay);
-    }
-
-    if (state.isRunning) { // Only log completion if it wasn't stopped
-        addLog("✅ Finished processing all users.");
-        state.isRunning = false;
-    }
-}
-
-console.log("Background script loaded and listening for messages.");

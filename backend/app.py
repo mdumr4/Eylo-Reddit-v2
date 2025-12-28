@@ -20,7 +20,7 @@ if not all([SUPABASE_URL, SUPABASE_KEY, GOOGLE_API_KEY]):
 # --- Initialization ---
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 app = Flask(__name__)
 CORS(app) # Enable CORS for all routes
@@ -124,22 +124,38 @@ def generate_message():
         return jsonify({"error": "Missing arguments"}), 400
 
     try:
-        full_prompt = build_gemini_prompt(post_content, main_prompt)
-        response = model.generate_content(full_prompt)
-
-        # Clean up response (sometimes Gemini adds markdown ticks)
-        response_text = response.text.strip()
-        if response_text.startswith("```json"):
-            response_text = response_text[7:]
-        if response_text.endswith("```"):
-            response_text = response_text[:-3]
-
-        json_response = json.loads(response_text)
+        # --- MOCK MODE (Bypassing API for Testing) ---
+        print(f"MOCK MODE: Bypassing Gemini. Post content length: {len(post_content)}")
+        json_response = {
+            "should_message": "YES",
+            "message_body": "Helloo"
+        }
         return jsonify(json_response)
 
+        # Original Logic (Commented Out)
+        # full_prompt = build_gemini_prompt(post_content, main_prompt)
+        # response = model.generate_content(full_prompt)
+        # ... (rest of logic skipped)
+
     except Exception as e:
-        print(f"Gemini/Processing Error: {e}")
-        return jsonify({"error": "AI Processing failed", "details": str(e)}), 500
+        error_str = str(e)
+        print(f"Gemini/Processing Error: {error_str}")
+
+        if "429" in error_str or "quota" in error_str.lower():
+            return jsonify({"error": "Rate Limit Exceeded", "user_message": "AI Rate Limit Hit. Waiting..."}), 429
+
+        # Diagnostic: If model not found, list available ones
+        if "404" in error_str or "not found" in error_str.lower():
+            print("\n--- DIAGNOSTIC: AVAILABLE MODELS ---")
+            try:
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        print(f"- {m.name}")
+            except:
+                print("Could not list models.")
+            print("------------------------------------\n")
+
+        return jsonify({"error": "AI Processing failed", "details": error_str, "user_message": "AI Model Error. Check backend logs."}), 500
 
 @app.route('/api/log', methods=['POST'])
 def log_user():
