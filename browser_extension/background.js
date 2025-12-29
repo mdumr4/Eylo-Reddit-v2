@@ -1,8 +1,11 @@
 // --- Centralized State Management ---
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+
 const state = {
     isRunning: false,
     messageBody: null,
     token: null,
+    refreshToken: null,
     queue: [], // Array of { user, retryCount }
     activeTabId: null, // The SINGLE active tab
     processedCount: 0,
@@ -14,6 +17,37 @@ const state = {
     error: null,
     tabUserMap: new Map() // Still needed for message correlation
 };
+
+// --- Helper: Refresh Session ---
+async function refreshSession() {
+    addLog("🔄 Token expired. Refreshing session...");
+    try {
+        const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+            method: 'POST',
+            headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ refresh_token: state.refreshToken })
+        });
+
+        if (!response.ok) throw new Error(`Refresh failed: ${response.statusText}`);
+
+        const data = await response.json();
+        state.token = data.access_token;
+        state.refreshToken = data.refresh_token;
+
+        // Update storage for next time
+        await chrome.storage.local.set({ session: { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user } });
+
+        addLog("✅ Session refreshed successfully.");
+        return true;
+    } catch (e) {
+        addLog(`❌ Critical Auth Error: ${e.message}`);
+        state.isRunning = false; // Stop automation
+        return false;
+    }
+}
 
 // Function to add a log message
 function addLog(message) {
@@ -35,7 +69,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         'messageSent': handleMessageSent,      // Maps to Workflow Complete
         'postScraped': handlePostScraped,      // Intermediate Step
         'workflowSkip': handleWorkflowSkip,    // Explicit Skip
-        'scrapedData': handleScrapedData       // Initial Scan Data
+        'scrapedData': handleScrapedData,      // Initial Scan Data
+        'scanHistory': handleScanHistory,      // Manual History Sync
+        'chatHistoryScraped': handleChatHistoryScraped // Result of History Sync
     };
 
     const commandHandler = commands[message.command];
@@ -54,6 +90,7 @@ function handleStart(message) {
         isRunning: true,
         mainPrompt: message.data.mainPrompt,
         token: message.data.token,
+        refreshToken: message.data.refreshToken,
         queue: [],
         processedCount: 0,
         messagedCount: 0,
@@ -198,7 +235,7 @@ async function handlePostScraped(message, sender) {
     addLog(`🧠 Analyzing post by ${user.author}...`);
 
     try {
-        const response = await fetch('http://127.0.0.1:5000/api/generate', {
+        let response = await fetch('http://127.0.0.1:5000/api/generate', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -209,6 +246,25 @@ async function handlePostScraped(message, sender) {
                 main_prompt: state.mainPrompt
             }),
         });
+
+        if (response.status === 401) {
+            const refreshed = await refreshSession();
+            if (refreshed) {
+                response = await fetch('http://127.0.0.1:5000/api/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${state.token}`
+                    },
+                    body: JSON.stringify({
+                        post_content: message.data.postContent,
+                        main_prompt: state.mainPrompt
+                    }),
+                });
+            } else {
+                throw new Error("Auth Failed (401) - Refresh Failed");
+            }
+        }
 
         if (response.status === 429) {
             // Signal Retry to the main loop?
@@ -257,6 +313,67 @@ async function handleAgentRequestNavigation(message, sender) {
     });
 }
 
+// 2a. Sync History Scraped Data Handlers
+async function handleScanHistory(message) {
+    addLog("🕵️ Starting Chat History Sync...");
+    state.token = message.data.token;
+    state.refreshToken = message.data.refreshToken;
+
+    // Create tab for chat
+    const tab = await chrome.tabs.create({ url: 'https://chat.reddit.com', active: true });
+    state.activeTabId = tab.id;
+
+    await waitForTabLoad(tab.id);
+    addLog("✅ Loaded Chat. Injecting Scraper...");
+
+    // Inject scraper
+    await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['src/chat_history_scraper.js']
+    });
+}
+
+async function handleChatHistoryScraped(message, sender) {
+    const usernames = message.data.usernames;
+    addLog(`📦 Received ${usernames.length} usernames. Syncing to DB...`);
+
+    try {
+        let response = await fetch('http://127.0.0.1:5000/api/log-bulk', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({ usernames: usernames }),
+        });
+
+        if (response.status === 401) {
+            const refreshed = await refreshSession();
+            if (refreshed) {
+                response = await fetch('http://127.0.0.1:5000/api/log-bulk', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${state.token}`
+                    },
+                    body: JSON.stringify({ usernames: usernames }),
+                });
+            }
+        }
+
+        const res = await response.json();
+        if (res.status === 'success') {
+            addLog(`✅ Synced ${res.count} users successfully!`);
+            // Optional: Close tab?
+            // chrome.tabs.remove(sender.tab.id);
+        } else {
+            addLog(`⚠️ Sync warning: ${res.error}`);
+        }
+    } catch (e) {
+        addLog(`❌ Sync Failed: ${e.message}`);
+    }
+}
+
 // 3. Message Sent -> Log -> Success
 async function handleMessageSent(message, sender) {
     if (sender.tab.id !== state.activeTabId) return;
@@ -266,7 +383,7 @@ async function handleMessageSent(message, sender) {
     state.messagedCount++;
 
     try {
-        await fetch('http://127.0.0.1:5000/api/log', {
+        let logResponse = await fetch('http://127.0.0.1:5000/api/log', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -274,6 +391,20 @@ async function handleMessageSent(message, sender) {
             },
             body: JSON.stringify({ reddit_username: user.author }),
         });
+
+        if (logResponse.status === 401) {
+            const refreshed = await refreshSession();
+            if (refreshed) {
+                await fetch('http://127.0.0.1:5000/api/log', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${state.token}`
+                    },
+                    body: JSON.stringify({ reddit_username: user.author }),
+                });
+            }
+        }
         resolveCurrent("Success (Sent & Logged)");
     } catch (e) {
         // Even if logging fails, message was sent.

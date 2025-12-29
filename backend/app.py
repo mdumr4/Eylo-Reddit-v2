@@ -192,6 +192,44 @@ def log_user():
         print(f"Logging Error: {e}")
         return jsonify({"error": "Failed to log", "details": str(e)}), 500
 
+@app.route('/api/log-bulk', methods=['POST'])
+def log_bulk():
+    """
+    Logs multiple usernames at once (Sync History).
+    Expects JSON: { "usernames": ["user1", "user2"] }
+    """
+    user_auth = verify_token(request)
+    if not user_auth:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = user_auth.user.id
+    data = request.get_json()
+    usernames = data.get('usernames', [])
+
+    if not usernames:
+        return jsonify({"status": "success", "count": 0})
+
+    # Prepare batch insert
+    records = [{"user_id": user_id, "reddit_username": u} for u in usernames if u]
+
+    try:
+        # Upsert with ignore_duplicates (requires ON CONFLICT config in Postgres?
+        # Actually Supabase-py 'upsert' works if we specify the constraint).
+        # OR: specific logic. simple insert with ignoreDuplicates: true usually works if client supports it.
+        # But supabase-py client .insert() doesn't seemingly have ignore_duplicates.
+        # .upsert() does.
+
+        result = supabase.table('outreach_logs').upsert(
+            records,
+            on_conflict='user_id, reddit_username',
+            ignore_duplicates=True
+        ).execute()
+
+        return jsonify({"status": "success", "count": len(usernames), "data": result.data})
+    except Exception as e:
+        print(f"Bulk Log Error: {e}")
+        return jsonify({"error": "Failed to log bulk", "details": str(e)}), 500
+
 if __name__ == '__main__':
     # In production (Render), this isn't used (Gunicorn is used instead)
     port = int(os.environ.get('PORT', 5000))

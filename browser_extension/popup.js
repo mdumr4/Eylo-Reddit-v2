@@ -43,12 +43,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         logStatus('Error: not logged in.');
                         return;
                     }
-
                     chrome.runtime.sendMessage({
                         command: 'start',
                         data: {
                             mainPrompt: mainPrompt,
-                            token: result.session.access_token
+                            token: result.session.access_token,
+                            refreshToken: result.session.refresh_token
                         }
                     });
                 });
@@ -69,6 +69,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
+
+    // --- Sync History Handler ---
+    const syncHistoryBtn = document.getElementById('syncHistoryBtn');
+    if (syncHistoryBtn) {
+        syncHistoryBtn.addEventListener('click', () => {
+            chrome.storage.local.get(['session'], (result) => {
+                if (!result.session || !result.session.access_token) {
+                    logStatus('Error: not logged in.');
+                    return;
+                }
+                chrome.runtime.sendMessage({
+                    command: 'scanHistory',
+                    data: {
+                        token: result.session.access_token,
+                        refreshToken: result.session.refresh_token
+                    }
+                });
+            });
+        });
+    }
 
     // --- UI Update Functions ---
     function updateUI(state) {
