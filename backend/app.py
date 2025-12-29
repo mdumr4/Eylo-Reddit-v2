@@ -172,8 +172,6 @@ def log_user():
 
     data = request.get_json()
     reddit_username = data.get('reddit_username')
-    subreddit = data.get('subreddit', 'unknown')
-
     if not reddit_username:
         return jsonify({"error": "Missing username"}), 400
 
@@ -182,10 +180,12 @@ def log_user():
         # We explicitly set the user_id to match the authenticated token
         result = supabase.table('outreach_logs').insert({
             "user_id": user_id,
-            "reddit_username": reddit_username,
-            "subreddit": subreddit,
-            "status": "SENT"
+            "reddit_username": reddit_username
         }).execute()
+
+        print(f"DEBUG: Insert Result: {result.data}")
+        if not result.data:
+            print("WARNING: Insert succeeded but returned no data. Possible RLS blocking.")
 
         return jsonify({"status": "success", "data": result.data})
     except Exception as e:

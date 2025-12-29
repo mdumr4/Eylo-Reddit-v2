@@ -272,7 +272,7 @@ async function handleMessageSent(message, sender) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${state.token}`
             },
-            body: JSON.stringify({ username: user.author, subreddit: user.subreddit || 'unknown' }),
+            body: JSON.stringify({ reddit_username: user.author }),
         });
         resolveCurrent("Success (Sent & Logged)");
     } catch (e) {

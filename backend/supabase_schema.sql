@@ -1,12 +1,11 @@
+-- Reset (Caution: Deletes existing data)
+DROP TABLE IF EXISTS public.outreach_logs;
+
 -- Create the outreach_logs table
 CREATE TABLE public.outreach_logs (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID REFERENCES auth.users(id) NOT NULL,
     reddit_username TEXT NOT NULL,
-    subreddit TEXT,
-    post_content_hash TEXT,
-    status TEXT DEFAULT 'SENT',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
 
     -- Ensure a user doesn't double-log the same reddit user?
     -- Or maybe we want to allow re-messaging after some time?
