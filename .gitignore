@@ -3,4 +3,3 @@ venv/
 
 # Ignore the file containing secret environment variables
 /backend/.env
-/backend/reddit-v2-474317-fdd57c831b75.json
