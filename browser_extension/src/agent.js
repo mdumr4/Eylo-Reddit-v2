@@ -91,11 +91,13 @@
             console.log("Agent: Finding Author Link...");
             const authorLink = await waitForElement('a[href^="/user/"], a[href^="/u/"], span[itemprop="author"] a, shreddit-post a[href^="/user/"]');
 
-            console.log("Agent: Clicking Author Link (Stealth)...");
-            await humanClick(authorLink);
-
-            console.log("Agent: Clicked. Signaling Background to wait for load...");
-            chrome.runtime.sendMessage({ command: 'agentRequestNavigation', data: { url: 'clicked' } });
+            if (authorLink) {
+                const url = authorLink.href;
+                console.log(`Agent: Found Author URL: ${url}. Requesting Navigation...`);
+                chrome.runtime.sendMessage({ command: 'agentRequestNavigation', data: { url: url } });
+            } else {
+                throw new Error("Author link not found");
+            }
 
         } catch (e) {
             chrome.runtime.sendMessage({ command: 'messagingError', data: { error: e.message + " (Finding Author)" } });
@@ -116,7 +118,7 @@
             console.log("🔍 Looking for Chat button...");
 
             // Specific selector for Reddit profile chat button
-            const chatSelector = 'a[href*="chat.reddit.com/user/"], [aria-label*="chat"], button[aria-label*="chat"], shreddit-async-loader[bundlename="chat_button_profile"]';
+            const chatSelector = 'a[href*="chat.reddit.com/user/"], shreddit-async-loader[bundlename="chat_button_profile"], button[aria-label="Start Chat"], button[aria-label="Message"]';
             let startChatBtn = null;
 
             // Loop for 5 seconds to find a VISIBLE button

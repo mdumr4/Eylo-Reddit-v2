@@ -100,11 +100,14 @@ function handleStart(message) {
         error: null
     });
 
+    const runId = Date.now();
+    state.runId = runId;
+
     const users = message.data.users || [];
     if (users.length > 0) {
         state.totalUsers = users.length; // Set total for UI
         addLog(`🔁 Queuing retry for ${users.length} users.`);
-        processUsers(users);
+        processUsers(users, runId);
     } else {
         addLog("🔍 Kicking off automation to find new users...");
         startAutomation();
@@ -143,13 +146,19 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function processUsers(users) {
+async function processUsers(users, runId) {
     // 1. Initialize Queue
     state.queue = users.map(u => ({ user: u, retryCount: 0 }));
     addLog(`📨 Queue initialized with ${state.queue.length} users.`);
 
     // 2. Start Loop
     while (state.queue.length > 0 && state.isRunning) {
+        // Concurrency Check
+        if (state.runId && state.runId !== runId) {
+            addLog("⚠️ Newer run started. specific loop terminating.");
+            break;
+        }
+
         const item = state.queue.shift();
         const { user, retryCount } = item;
 
@@ -183,6 +192,10 @@ async function processUsers(users) {
                 files: ['src/agent.js']
             });
 
+            // Trigger Scrape
+            await sleep(1000); // Wait for script to init
+            chrome.tabs.sendMessage(state.activeTabId, { command: 'scrape' });
+
             // C. WAIT for workflow result
             // This promise will be resolved by handleWorkflowComplete/Error/Skip
             const result = await new Promise((resolve, reject) => {
@@ -201,6 +214,13 @@ async function processUsers(users) {
         } catch (error) {
             addLog(`⚠️ Attempt ${retryCount + 1} failed for ${user.author}: ${error.message}`);
 
+            // Critical Error Check
+            if (error.message.includes("Auth Failed")) {
+                addLog("🛑 Critical Auth Failure. Stopping automation. Please Re-Login.");
+                state.isRunning = false;
+                break;
+            }
+
             if (retryCount < 3) {
                 addLog(`🔄 Re-queueing ${user.author} at the end.`);
                 state.queue.push({ user, retryCount: retryCount + 1 });
@@ -214,12 +234,12 @@ async function processUsers(users) {
         }
 
         // Random Delay
-        const delay = Math.random() * (20000 - 10000) + 10000;
+        const delay = Math.random() * (8000 - 2000) + 2000;
         addLog(`⏳ Waiting ${Math.round(delay / 1000)}s before next...`);
         await sleep(delay);
     }
 
-    if (state.isRunning) {
+    if (state.isRunning && state.runId === runId) {
         addLog("✅ All queue items processed.");
         state.isRunning = false;
     }
@@ -279,7 +299,7 @@ async function handlePostScraped(message, sender) {
             addLog(`👍 Decision YES. Navigating to profile...`);
             state.messageBody = result.message_body;
 
-            // Tell Agent to Click Link
+            // Tell Agent to Click Link or Send URL
             chrome.tabs.sendMessage(state.activeTabId, { command: 'navigateProfile' });
             // Now we wait for 'agentRequestNavigation' or 'workflowError'
         } else {
@@ -296,7 +316,13 @@ async function handlePostScraped(message, sender) {
 async function handleAgentRequestNavigation(message, sender) {
     if (sender.tab.id !== state.activeTabId) return;
 
-    addLog(`🖱️ Agent navigated. Waiting for load...`);
+    if (message.data && message.data.url && message.data.url.startsWith('http')) {
+        addLog(`🖱️ Navigating to profile: ${message.data.url}`);
+        await chrome.tabs.update(state.activeTabId, { url: message.data.url });
+    } else {
+        addLog(`🖱️ Agent clicked. Waiting for load...`);
+    }
+
     await waitForTabLoad(state.activeTabId);
 
     // Inject again
@@ -494,7 +520,7 @@ async function filterUsers(scrapedPosts) {
             state.isRunning = false;
         } else {
             state.totalUsers = uniquePosts.length; // Set total for UI
-            processUsers(uniquePosts);
+            processUsers(uniquePosts, state.runId);
         }
 
     } catch (e) {
