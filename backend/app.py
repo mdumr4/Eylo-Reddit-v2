@@ -2,7 +2,7 @@ import os
 import json
 from flask import Flask, request, jsonify
 from supabase import create_client, Client
-import google.generativeai as genai
+from openai import OpenAI
 from dotenv import load_dotenv
 from flask_cors import CORS
 
@@ -12,15 +12,14 @@ load_dotenv()
 # --- Configuration ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY") # This should be the SERVICE ROLE key for the backend
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-if not all([SUPABASE_URL, SUPABASE_KEY, GOOGLE_API_KEY]):
+if not all([SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY]):
     print("CRITICAL WARNING: Missing API Keys in environment variables.")
 
 # --- Initialization ---
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 app = Flask(__name__)
 CORS(app) # Enable CORS for all routes
@@ -44,28 +43,11 @@ def verify_token(request):
         print(f"Auth Error: {e}")
         return None
 
-def build_gemini_prompt(post_content, main_prompt):
-    """Builds the structured prompt for Gemini."""
-    return f"""
-System Instruction:
-{main_prompt}
-
----
-Post Content to Analyze:
-{post_content}
----
-
-Your Response Format:
-You must respond in a raw JSON format only, with no markdown. The JSON object must have two keys:
-1. "should_message" (string: "YES" or "NO")
-2. "message_body" (string: the generated message, or an empty string if "NO").
-"""
-
 # --- API Endpoints ---
 
 @app.route('/')
 def health_check():
-    return jsonify({"status": "healthy", "service": "Reddit Outreach V2 Oracle"})
+    return jsonify({"status": "healthy", "service": "Reddit Outreach V2 Oracle (ChatGPT)"})
 
 @app.route('/api/check-users', methods=['POST'])
 def check_users():
@@ -74,9 +56,7 @@ def check_users():
     Expects JSON: { "usernames": ["user1", "user2"] }
     Returns: { "new_users": ["user2"] }
     """
-    # 1. Auth Check (Optional for this specific endpoint?
-    #    Maybe we want the extension to check before even generating data.
-    #    Let's enforce auth to prevent unauthorized scraping support)
+    # 1. Auth Check
     user_auth = verify_token(request)
     if not user_auth:
         return jsonify({"error": "Unauthorized"}), 401
@@ -87,8 +67,6 @@ def check_users():
         return jsonify({"new_users": []})
 
     # 2. Query Supabase
-    # We check the outreach_logs table to see if specific reddit_usernames exist.
-    # Note: If we want to prevent ANYONE from messaging the same user twice, we check globally.
     try:
         response = supabase.table('outreach_logs') \
             .select('reddit_username') \
@@ -108,7 +86,7 @@ def check_users():
 @app.route('/api/generate', methods=['POST'])
 def generate_message():
     """
-    Secure Proxy to Gemini.
+    Secure Proxy to ChatGPT.
     Expects JSON: { "post_content": "...", "main_prompt": "..." }
     """
     # 1. Auth Check
@@ -124,36 +102,42 @@ def generate_message():
         return jsonify({"error": "Missing arguments"}), 400
 
     try:
-        # --- MOCK MODE (Bypassing API for Testing) ---
-        print(f"MOCK MODE: Bypassing Gemini. Post content length: {len(post_content)}")
-        json_response = {
-            "should_message": "YES",
-            "message_body": "Helloo"
-        }
-        return jsonify(json_response)
+        print(f"Generating message for post length: {len(post_content)}")
 
-        # Original Logic (Commented Out)
-        # full_prompt = build_gemini_prompt(post_content, main_prompt)
-        # response = model.generate_content(full_prompt)
-        # ... (rest of logic skipped)
+        system_instruction = f"""
+{main_prompt}
+
+Your Response Format:
+You must respond in a raw JSON format only, with no markdown. The JSON object must have two keys:
+1. "should_message" (string: "YES" or "NO")
+2. "message_body" (string: the generated message, or an empty string if "NO").
+"""
+
+        user_message = f"""
+Post Content to Analyze:
+{post_content}
+"""
+
+        completion = client.chat.completions.create(
+            model="gpt-4o", # Or gpt-3.5-turbo if preferred
+            response_format={ "type": "json_object" },
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_message}
+            ]
+        )
+
+        content = completion.choices[0].message.content
+        result = json.loads(content)
+
+        return jsonify(result)
 
     except Exception as e:
         error_str = str(e)
-        print(f"Gemini/Processing Error: {error_str}")
+        print(f"OpenAI/Processing Error: {error_str}")
 
         if "429" in error_str or "quota" in error_str.lower():
             return jsonify({"error": "Rate Limit Exceeded", "user_message": "AI Rate Limit Hit. Waiting..."}), 429
-
-        # Diagnostic: If model not found, list available ones
-        if "404" in error_str or "not found" in error_str.lower():
-            print("\n--- DIAGNOSTIC: AVAILABLE MODELS ---")
-            try:
-                for m in genai.list_models():
-                    if 'generateContent' in m.supported_generation_methods:
-                        print(f"- {m.name}")
-            except:
-                print("Could not list models.")
-            print("------------------------------------\n")
 
         return jsonify({"error": "AI Processing failed", "details": error_str, "user_message": "AI Model Error. Check backend logs."}), 500
 
@@ -213,12 +197,6 @@ def log_bulk():
     records = [{"user_id": user_id, "reddit_username": u} for u in usernames if u]
 
     try:
-        # Upsert with ignore_duplicates (requires ON CONFLICT config in Postgres?
-        # Actually Supabase-py 'upsert' works if we specify the constraint).
-        # OR: specific logic. simple insert with ignoreDuplicates: true usually works if client supports it.
-        # But supabase-py client .insert() doesn't seemingly have ignore_duplicates.
-        # .upsert() does.
-
         result = supabase.table('outreach_logs').upsert(
             records,
             on_conflict='user_id, reddit_username',
