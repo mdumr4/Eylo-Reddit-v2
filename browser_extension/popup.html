@@ -123,16 +123,31 @@
 
 <body>
 
-    <!-- LOGIN SCREEN -->
-    <div id="login-screen">
-        <h2>🔐 Login Required</h2>
-        <input type="email" id="email" placeholder="Email" />
-        <input type="password" id="password" placeholder="Password" />
-        <div id="login-error" class="error"></div>
-        <button id="loginBtn" class="btn-primary">Login</button>
-        <p style="font-size: 11px; color: #666; text-align: center;">
-            Please create an account in Supabase manually if you haven't.
-        </p>
+    <!-- AUTH SCREEN CONTAINER -->
+    <div id="auth-container">
+        <!-- LOGIN SCREEN -->
+        <div id="login-screen">
+            <h2>🔐 Login</h2>
+            <input type="email" id="email" placeholder="Email" />
+            <input type="password" id="password" placeholder="Password" />
+            <button id="loginBtn" class="btn-primary">Login</button>
+            <p style="font-size: 11px; text-align: center;">
+                Don't have an account? <a href="#" id="showSignupBtn">Sign Up</a>
+            </p>
+        </div>
+
+        <!-- SIGNUP SCREEN -->
+        <div id="signup-screen" style="display: none;">
+            <h2>📝 Sign Up</h2>
+            <input type="email" id="signup-email" placeholder="Email" />
+            <input type="password" id="signup-password" placeholder="Password" />
+            <button id="signupBtn" class="btn-primary">Sign Up</button>
+            <p style="font-size: 11px; text-align: center;">
+                Already have an account? <a href="#" id="showLoginBtn">Login</a>
+            </p>
+        </div>
+
+        <div id="auth-error" class="error"></div>
     </div>
 
     <!-- DASHBOARD SCREEN -->
