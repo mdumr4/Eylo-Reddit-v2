@@ -119,7 +119,7 @@ Post Content to Analyze:
 """
 
         completion = client.chat.completions.create(
-            model="gpt-4o", # Or gpt-3.5-turbo if preferred
+            model="gpt-4o-mini", # Or gpt-3.5-turbo if preferred
             response_format={ "type": "json_object" },
             messages=[
                 {"role": "system", "content": system_instruction},

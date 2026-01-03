@@ -40,15 +40,12 @@
             el.dispatchEvent(new Event('input', { bubbles: true }));
         };
 
-        setNativeValue(element, "");
+        // Instant "paste" logic
+        setNativeValue(element, text);
 
-        for (const char of text) {
-            await sleep(randomPoint(20, 50));
-            const val = element.value;
-            setNativeValue(element, val + char);
-        }
-
+        // Ensure UI updates
         element.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(200); // Brief pause for React to sync
     }
 
     function waitForElement(selector, timeout = 10000) {
