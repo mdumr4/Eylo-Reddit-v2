@@ -1,5 +1,23 @@
-# Ignore the Python virtual environment
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
 venv/
+env/
+.env
+.venv/
 
-# Ignore the file containing secret environment variables
-/backend/.env
+# Environment Variables
+.env
+backend/.env
+browser_extension/.env
+
+# MacOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Extension
+browser_extension/dist/

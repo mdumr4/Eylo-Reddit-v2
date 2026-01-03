@@ -1,90 +1,62 @@
-# Reddit Outreach Automation V2 🤖
+# Reddit Outreach Automation V2
 
-This project is an automated outreach tool for Reddit, consisting of a **Chrome Browser Extension** (for navigating and interacting with Reddit) and a **Python Flask Backend** (for AI generation and database logging).
+A powerful browser extension and backend system to automate outreach on Reddit. This tool helps teams find relevant users, analyze their posts using AI, and send personalized messages.
 
-## 📂 Project Structure
+## Features
 
-- `browser_extension/`: The Chrome Extension source code.
-- `backend/`: The Python Flask API and database schemas.
+-   **AI-Powered Filtering**: Uses OpenAI (GPT-4) to analyze posts and decide if a user is a good lead based on your custom prompt.
+-   **Automated Messaging**: Navigate to profiles and start chats automatically.
+-   **Team Ready**: Multi-user support with Login/Signup functionality.
+-   **Centralized Logging**: Tracks all messaged users in a Supabase database to prevent double-messaging across the team.
+-   **History Sync**: Scrapes existing chat history to ensure your database is up-to-date.
 
----
+## Project Structure
 
-## ✅ Prerequisites
+-   `browser_extension/`: The chrome extension source code (Frontend).
+-   `backend/`: The Python Flask API that handles Database logging and AI analysis.
 
-1.  **Python 3.8+** installed.
-2.  **Google Chrome** browser.
-3.  A **Supabase** account (Free tier is fine).
-4.  A **Google Gemini API Key** (for AI generation).
+## Setup & Installation
 
----
+### 1. Prerequisites
+-   Python 3.8+
+-   A Supabase Project (Database & Auth)
+-   An OpenAI API Key
 
-## 🛠️ Backend Setup
-
-The backend handles AI message generation and logs outreach history to Supabase.
-
-1.  **Navigate to the backend folder**:
+### 2. Backend Setup
+1.  Navigate to the `backend` folder:
     ```bash
     cd backend
     ```
-
-2.  **Create and Activate a Virtual Environment** (Recommended):
-    ```bash
-    python -m venv venv
-    # Windows:
-    .\venv\Scripts\activate
-    # Mac/Linux:
-    source venv/bin/activate
-    ```
-
-3.  **Install Dependencies**:
+2.  Install dependencies:
     ```bash
     pip install -r requirements.txt
     ```
-
-4.  **Set up Environment Variables**:
-    Create a `.env` file in the `backend/` directory:
-    ```ini
-    SUPABASE_URL="your_supabase_url"
-    SUPABASE_KEY="your_supabase_service_role_key"
-    GOOGLE_API_KEY="your_gemini_api_key"
+3.  Create a `.env` file in `backend/` with your keys:
+    ```env
+    SUPABASE_URL=your_supabase_url
+    SUPABASE_KEY=your_service_role_key
+    OPENAI_API_KEY=sk-...
     ```
-
-5.  **Run the Server**:
+4.  Run the backend:
     ```bash
     python app.py
     ```
-    *The server runs on `http://127.0.0.1:5000`*
 
-6.  **Database Setup (Supabase)**:
-    - Go to your Supabase SQL Editor.
-    - Run the contents of `backend/supabase_schema.sql` to create the `outreach_logs` table.
-
----
-
-## 🧩 Browser Extension Setup
-
+### 3. Extension Setup
 1.  Open Chrome and go to `chrome://extensions`.
-2.  Enable **Developer Mode** (top right toggle).
-3.  Click **Load Unpacked**.
-4.  Select the `browser_extension` folder from this project.
+2.  Enable **Developer Mode** (top right).
+3.  Click **Load unpacked** and select the `browser_extension` folder.
+4.  **Important**: Update `browser_extension/config.js` with your Supabase URL and Backend URL (see Deployment).
 
----
+## Deployment (For Teams)
 
-## 🚀 Usage Guide
+To allow your team to use this extension remotely, you must deploy the backend to a public server.
+**See [DEPLOY.md](DEPLOY.md) for full deployment instructions.**
 
-1.  **Start the Backend**: Make sure `python app.py` is running in your terminal.
-2.  **Open Reddit**: Go to a subreddit (e.g., `r/freelanceForHire` or `r/test`).
-3.  **Open Extension**: Click the robot icon in your Chrome toolbar.
-4.  **Login**: Enter any email/password (Dummy login for now, or match your Supabase Auth user if enforced).
-5.  **Config**: Enter a "Main Prompt" (e.g., "Find users looking for web dev work").
-6.  **Start**: Click **Start Automation**.
-    - The bot will find users, open their profiles, generate a message using the Backend, type it, and send it.
-    - **Note**: Currently running in **Mock Mode** (generates "Helloo") to save API credits.
+## Development
 
----
+-   **Frontend**: Vanilla JS (Popup), Content Scripts (Interaction).
+-   **Backend**: Flask, Supabase-py, OpenAI.
 
-## 🐛 Troubleshooting
-
--   **"Failed to fetch"**: Ensure the backend is running (`python app.py`).
--   **Old Icons?**: If you see old icons, reload the extension or clear Chrome cache.
--   **Logging Issues**: Check the backend terminal for `DEBUG: Insert Result`. If empty, check your Supabase RLS policies.
+## License
+[License Name]
