@@ -1,5 +1,5 @@
 // --- Centralized State Management ---
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, BACKEND_URL } from './config.js';
 
 const state = {
     isRunning: false,
@@ -255,7 +255,7 @@ async function handlePostScraped(message, sender) {
     addLog(`🧠 Analyzing post by ${user.author}...`);
 
     try {
-        let response = await fetch('http://127.0.0.1:5000/api/generate', {
+        let response = await fetch(`${BACKEND_URL}/api/generate`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -270,7 +270,7 @@ async function handlePostScraped(message, sender) {
         if (response.status === 401) {
             const refreshed = await refreshSession();
             if (refreshed) {
-                response = await fetch('http://127.0.0.1:5000/api/generate', {
+                response = await fetch(`${BACKEND_URL}/api/generate`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -364,7 +364,7 @@ async function handleChatHistoryScraped(message, sender) {
     addLog(`📦 Received ${usernames.length} usernames. Syncing to DB...`);
 
     try {
-        let response = await fetch('http://127.0.0.1:5000/api/log-bulk', {
+        let response = await fetch(`${BACKEND_URL}/api/log-bulk`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -376,7 +376,7 @@ async function handleChatHistoryScraped(message, sender) {
         if (response.status === 401) {
             const refreshed = await refreshSession();
             if (refreshed) {
-                response = await fetch('http://127.0.0.1:5000/api/log-bulk', {
+                response = await fetch(`${BACKEND_URL}/api/log-bulk`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -409,7 +409,7 @@ async function handleMessageSent(message, sender) {
     state.messagedCount++;
 
     try {
-        let logResponse = await fetch('http://127.0.0.1:5000/api/log', {
+        let logResponse = await fetch(`${BACKEND_URL}/api/log`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -421,7 +421,7 @@ async function handleMessageSent(message, sender) {
         if (logResponse.status === 401) {
             const refreshed = await refreshSession();
             if (refreshed) {
-                await fetch('http://127.0.0.1:5000/api/log', {
+                await fetch(`${BACKEND_URL}/api/log`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -493,7 +493,7 @@ async function filterUsers(scrapedPosts) {
     addLog(`Found ${authors.length} authors. Checking DB...`);
 
     try {
-        const response = await fetch('http://127.0.0.1:5000/api/check-users', {
+        const response = await fetch(`${BACKEND_URL}/api/check-users`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
