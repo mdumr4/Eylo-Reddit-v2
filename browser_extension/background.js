@@ -19,34 +19,47 @@ const state = {
 };
 
 // --- Helper: Refresh Session ---
+let refreshPromise = null;
+
 async function refreshSession() {
-    addLog("🔄 Token expired. Refreshing session...");
-    try {
-        const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-            method: 'POST',
-            headers: {
-                'apikey': SUPABASE_ANON_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ refresh_token: state.refreshToken })
-        });
-
-        if (!response.ok) throw new Error(`Refresh failed: ${response.statusText}`);
-
-        const data = await response.json();
-        state.token = data.access_token;
-        state.refreshToken = data.refresh_token;
-
-        // Update storage for next time
-        await chrome.storage.local.set({ session: { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user } });
-
-        addLog("✅ Session refreshed successfully.");
-        return true;
-    } catch (e) {
-        addLog(`❌ Critical Auth Error: ${e.message}`);
-        state.isRunning = false; // Stop automation
-        return false;
+    if (refreshPromise) {
+        addLog("🔄 Token refresh already in progress. Waiting...");
+        return refreshPromise;
     }
+
+    refreshPromise = (async () => {
+        addLog("🔄 Token expired. Refreshing session...");
+        try {
+            const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+                method: 'POST',
+                headers: {
+                    'apikey': SUPABASE_ANON_KEY,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ refresh_token: state.refreshToken })
+            });
+
+            if (!response.ok) throw new Error(`Refresh failed: ${response.statusText}`);
+
+            const data = await response.json();
+            state.token = data.access_token;
+            state.refreshToken = data.refresh_token;
+
+            // Update storage for next time
+            await chrome.storage.local.set({ session: { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user } });
+
+            addLog("✅ Session refreshed successfully.");
+            return true;
+        } catch (e) {
+            addLog(`❌ Critical Auth Error: ${e.message}`);
+            state.isRunning = false; // Stop automation
+            return false;
+        } finally {
+            refreshPromise = null; // Release Lock
+        }
+    })();
+
+    return refreshPromise;
 }
 
 // Function to add a log message
