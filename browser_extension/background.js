@@ -28,8 +28,21 @@ async function refreshSession() {
     }
 
     refreshPromise = (async () => {
-        addLog("🔄 Token expired. Refreshing session...");
         try {
+            // 1. Check Storage for a newer token (Handling Popup/Auth.js auto-refresh)
+            const stored = await chrome.storage.local.get(['session']);
+            if (stored.session && stored.session.refresh_token && stored.session.refresh_token !== state.refreshToken) {
+                addLog("✨ Found fresher token in storage! Adopting it.");
+                state.token = stored.session.access_token;
+                state.refreshToken = stored.session.refresh_token;
+                if (stored.session.user) state.user = stored.session.user;
+                return true; // Use the stored one, don't burn a refresh
+            }
+
+            // 2. Perform Refresh
+            const tokenPart = state.refreshToken ? state.refreshToken.slice(-5) : "NULL";
+            addLog(`🔄 Refreshing session (Token ends in ...${tokenPart})...`);
+
             const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
                 method: 'POST',
                 headers: {
