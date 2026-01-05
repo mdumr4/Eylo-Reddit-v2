@@ -101,6 +101,20 @@
         }
     }
 
+    // --- Helper: Deep Shadow Search (Global) ---
+    const findInShadows = (selector, root = document.body) => {
+        let el = root.querySelector(selector);
+        if (el) return el;
+        const elements = root.querySelectorAll('*');
+        for (const elem of elements) {
+            if (elem.shadowRoot) {
+                el = findInShadows(selector, elem.shadowRoot);
+                if (el) return el;
+            }
+        }
+        return null;
+    };
+
     // NEW: Helper for check if element is editable
     function isEditable(el) {
         if (!el) return false;
@@ -142,18 +156,7 @@
             // --- 1. Robust Input Finding (Shadow DOM Compatible) ---
             console.log("🔍 Looking for message input (Deep Search)...");
 
-            const findInShadows = (selector, root = document.body) => {
-                let el = root.querySelector(selector);
-                if (el) return el;
-                const elements = root.querySelectorAll('*');
-                for (const elem of elements) {
-                    if (elem.shadowRoot) {
-                        el = findInShadows(selector, elem.shadowRoot);
-                        if (el) return el;
-                    }
-                }
-                return null;
-            };
+
 
             const getSelectors = () => [
                 'textarea[aria-label="Write message"]',
@@ -254,22 +257,57 @@
                 return val.trim() === "";
             };
 
-            // Attempt 1: Human Click
-            if (sendBtn && !sendBtn.disabled) {
-                console.log("✅ Attempt 1: Clicking Send button...");
-                await humanClick(sendBtn);
-                await sleep(1500);
-            }
+            // --- Helper: Success Validator (Polls for Errors) ---
+            const validateSuccess = async (methodName) => {
+                console.log(`✅ Message sent successfully (${methodName})!`);
+                console.log("⏳ Validating send (polling for 10s for potential error toasts)...");
 
-            // Fast Verify & Fallback
-            if (isMessageSent()) {
-                console.log("✅ Message sent successfully!");
+                // Helper to check for error banner text
+                const checkErrorBanner = () => {
+                    const errorPhrases = ["Let's take a break", "lot of invites", "lot of chats"];
+
+                    // 1. Efficient Check: Look for top-level alerts banner directly
+                    let alertBanner = document.querySelector('rs-alerts-banner');
+
+                    if (alertBanner && alertBanner.shadowRoot) {
+                        const faceplate = alertBanner.shadowRoot.querySelector('faceplate-banner');
+                        if (faceplate) {
+                            const msg = faceplate.getAttribute('msg') || faceplate.innerText || "";
+                            if (errorPhrases.some(phrase => msg.includes(phrase))) return true;
+                        }
+                    }
+
+                    // 2. Fallback: Deep Search (Only if necessary)
+                    try {
+                        const banner = findInShadows('faceplate-banner[appearance="error"]');
+                        if (banner) {
+                            const msg = banner.getAttribute('msg') || banner.innerText || "";
+                            if (errorPhrases.some(phrase => msg.includes(phrase))) return true;
+                        }
+                    } catch (e) {
+                        console.warn("Deep search extraction error:", e);
+                    }
+
+                    return false;
+                };
+
+                // Polling Loop (5 seconds)
+                for (let i = 1; i <= 10; i++) {
+                    await sleep(500);
+                    if (i % 2 === 0) console.log(`⏳ Checking for errors... (${i / 2}s / 5s)`);
+
+                    if (checkErrorBanner()) {
+                        console.error("🛑 Rate Limit Detected during validation.");
+                        throw new Error("Rate Limit Exceeded");
+                    }
+                }
+
+                console.log("✅ Validation passed. No errors found.");
                 chrome.runtime.sendMessage({ command: 'messageSent' });
-                return;
-            }
+            };
 
-            // Attempt 2: Enter Key (Proven to work)
-            console.log("⚠️ Click failed/ignored. Using Enter key...");
+            // Attempt 1: Enter Key (User Preferred)
+            console.log("🚀 Attempt 1: Using Enter key...");
             input.focus();
             input.dispatchEvent(new KeyboardEvent('keydown', {
                 key: 'Enter', code: 'Enter', keyCode: 13,
@@ -278,24 +316,70 @@
             await sleep(1500);
 
             if (isMessageSent()) {
-                console.log("✅ Message sent (Enter key)!");
-                chrome.runtime.sendMessage({ command: 'messageSent' });
-            } else {
-                // Final hail mary: Force click
-                if (sendBtn) {
-                    sendBtn.click();
-                    await sleep(1000);
-                    if (isMessageSent()) {
-                        console.log("✅ Message sent (Force Click)!");
-                        chrome.runtime.sendMessage({ command: 'messageSent' });
-                        return;
-                    }
-                }
-                throw new Error("❌ Failed to send message. Input field did not clear.");
+                await validateSuccess("Enter Key");
+                return;
             }
+
+            // Final hail mary: Force click
+            if (sendBtn) {
+                sendBtn.click();
+                await sleep(1000);
+                if (isMessageSent()) {
+                    await validateSuccess("Force Click");
+                    return;
+                }
+            }
+
+            throw new Error("❌ Failed to send message. Input field did not clear.");
 
         } catch (error) {
             console.error("❌ Error:", error.message);
+
+            // 1. Immediate Check: Did validation already catch it?
+            if (error.message.includes("Rate Limit Exceeded")) {
+                chrome.runtime.sendMessage({
+                    command: 'messagingError',
+                    data: { error: "Rate Limit Exceeded" }
+                });
+                return;
+            }
+
+            // 2. Final Safety Check (Double Verify)
+            // (Only runs if error was something else, like "Input not cleared")
+            const errorPhrases = ["Let's take a break", "lot of invites", "lot of chats"];
+            let rateLimitFound = false;
+
+            try {
+                // Check findInShadows
+                const banner = findInShadows('faceplate-banner[appearance="error"]');
+                if (banner) {
+                    const msg = banner.getAttribute('msg') || banner.innerText || "";
+                    if (errorPhrases.some(phrase => msg.includes(phrase))) rateLimitFound = true;
+                }
+
+                if (!rateLimitFound) {
+                    const alerts = document.querySelector('rs-alerts-banner');
+                    if (alerts && alerts.shadowRoot) {
+                        const innerBanner = alerts.shadowRoot.querySelector('faceplate-banner');
+                        if (innerBanner) {
+                            const msg = innerBanner.getAttribute('msg') || innerBanner.innerText || "";
+                            if (errorPhrases.some(phrase => msg.includes(phrase))) rateLimitFound = true;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn("Safety check failed:", e);
+            }
+
+            if (rateLimitFound) {
+                chrome.runtime.sendMessage({
+                    command: 'messagingError',
+                    data: { error: "Rate Limit Exceeded" }
+                });
+                return;
+            }
+
+            // Generic Error
             chrome.runtime.sendMessage({
                 command: 'messagingError',
                 data: { error: error.message }

@@ -247,6 +247,12 @@ async function processUsers(users, runId) {
                 break;
             }
 
+            if (error.message.includes("Rate Limit Exceeded")) {
+                addLog("🛑 Reddit Rate Limit Reached. Stopping automation to protect account.");
+                state.isRunning = false;
+                break;
+            }
+
             if (retryCount < 3) {
                 addLog(`🔄 Re-queueing ${user.author} at the end.`);
                 state.queue.push({ user, retryCount: retryCount + 1 });
@@ -466,6 +472,7 @@ async function handleMessageSent(message, sender) {
 
 function handleMessagingError(message, sender) {
     addLog(`❌ Client Error: ${message.data.error}`);
+    // If it's a rate limit error, we want to reject it so the main loop catches it
     rejectCurrent(new Error(message.data.error));
 }
 
