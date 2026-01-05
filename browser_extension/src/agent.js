@@ -260,7 +260,7 @@
             // --- Helper: Success Validator (Polls for Errors) ---
             const validateSuccess = async (methodName) => {
                 console.log(`✅ Message sent successfully (${methodName})!`);
-                console.log("⏳ Validating send (polling for 10s for potential error toasts)...");
+                console.log("⏳ Validating send (polling for 3s for potential error toasts)...");
 
                 // Helper to check for error banner text
                 const checkErrorBanner = () => {
@@ -291,10 +291,10 @@
                     return false;
                 };
 
-                // Polling Loop (5 seconds)
-                for (let i = 1; i <= 10; i++) {
+                // Polling Loop (3 seconds)
+                for (let i = 1; i <= 6; i++) {
                     await sleep(500);
-                    if (i % 2 === 0) console.log(`⏳ Checking for errors... (${i / 2}s / 5s)`);
+                    if (i % 2 === 0) console.log(`⏳ Checking for errors... (${i / 2}s / 3s)`);
 
                     if (checkErrorBanner()) {
                         console.error("🛑 Rate Limit Detected during validation.");
