@@ -235,6 +235,10 @@ async function processUsers(users, runId) {
             });
 
             addLog(`✅ Work for ${user.author} finished: ${result}`);
+
+            if (typeof result === 'string' && result.startsWith("Skipped")) {
+                state.skippedCount++;
+            }
             state.processedCount++;
 
         } catch (error) {
@@ -526,7 +530,7 @@ async function filterUsers(scrapedPosts) {
     addLog(`Found ${authors.length} authors. Checking DB...`);
 
     try {
-        const response = await fetch(`${BACKEND_URL}/api/check-users`, {
+        let response = await fetch(`${BACKEND_URL}/api/check-users`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -534,6 +538,23 @@ async function filterUsers(scrapedPosts) {
             },
             body: JSON.stringify({ usernames: authors }),
         });
+
+        if (response.status === 401) {
+            addLog("🔄 Token expired during user check. Refreshing...");
+            const refreshed = await refreshSession();
+            if (refreshed) {
+                response = await fetch(`${BACKEND_URL}/api/check-users`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${state.token}`
+                    },
+                    body: JSON.stringify({ usernames: authors }),
+                });
+            } else {
+                throw new Error("Auth Failed - Could not refresh session.");
+            }
+        }
         const result = await response.json();
 
         // Match posts to new authors
