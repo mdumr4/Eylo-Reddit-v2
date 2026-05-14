@@ -21,3 +21,4 @@ browser_extension/.env
 
 # Extension
 browser_extension/dist/
+browser_extension/config.js
