@@ -11,6 +11,7 @@ env/
 .env
 backend/.env
 browser_extension/.env
+browser_extension/config.js
 
 # MacOS
 .DS_Store
@@ -21,4 +22,3 @@ browser_extension/.env
 
 # Extension
 browser_extension/dist/
-browser_extension/config.js
