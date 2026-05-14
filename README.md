@@ -2,6 +2,9 @@
 
 A powerful Chrome extension and Python backend suite designed to automate and personalize Reddit outreach. This tool scrapes relevant posts, leverages GPT-4 to identify high-quality prospects based on a custom persona, and automates the DM process while ensuring no duplicate messaging across your team.
 
+> [!IMPORTANT]
+> **Live System:** The backend is already deployed and active. New users can simply load the extension and start working immediately without any local setup.
+
 ## 🚀 Features
 
 - 🎯 **AI Filtering**: Uses GPT-4 to analyze Reddit posts and filter users that match your specific target persona.
@@ -37,44 +40,30 @@ Before you begin, ensure you have the following:
 - **Supabase Account** (for database and authentication).
 - **Render/Heroku/Railway Account** (optional, for public backend hosting).
 
-## 🛠️ Installation
+### ⚡ Quick Start (Team Members)
 
-### 1. Backend Setup
-
-1. Navigate to the backend directory:
-   ```bash
-   cd backend
-   ```
-2. Create and activate a virtual environment:
-   ```bash
-   python -m venv venv
-   # Windows
-   .\venv\Scripts\activate
-   # macOS/Linux
-   source venv/bin/activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Configure environment variables:
-   - Create a `.env` file in the `backend/` folder.
-   - Copy the values from `.env.example`.
-   - ⚠️ **SECURITY:** Never commit your `.env` file to version control.
-
-5. Start the backend:
-   ```bash
-   python app.py
-   ```
-
-### 2. Chrome Extension Setup
-
+If you are joining the team, you **do not** need to set up the backend locally.
 1. Open Chrome and navigate to `chrome://extensions/`.
-2. Enable **Developer mode** (toggle in the top right).
+2. Enable **Developer mode** (top right).
 3. Click **Load unpacked** and select the `browser_extension` folder.
-4. Configure the extension:
-   - Copy `browser_extension/config.example.js` to `browser_extension/config.js`.
-   - Open `browser_extension/config.js` and update the constants with your Supabase and Backend URLs.
+4. (Optional) If `config.js` is missing, copy `config.example.js` to `config.js`. It is already pre-configured with the live backend URL.
+
+---
+
+### 🛠️ Full Installation (Developers)
+
+If you need to modify the backend or run a local instance:
+
+#### 1. Backend Setup
+1. Navigate to the backend directory: `cd backend`
+2. Create and activate a virtual environment (`python -m venv venv`).
+3. Install dependencies: `pip install -r requirements.txt`.
+4. Configure `.env` with your own keys (see `.env.example`).
+5. Start the backend: `python app.py`.
+
+#### 2. Chrome Extension Setup
+1. Load the extension as described in the Quick Start.
+2. Update `BACKEND_URL` in `browser_extension/config.js` to `http://localhost:5000`.
 
 ## ⚙️ Configuration Reference
 
