@@ -1,3 +1,7 @@
+---
+trigger: always_on
+---
+
 # AGENTS.md - Repository Architecture & Development Guidelines
 
 This repository implements **Reddit Outreach Automation V2**, a dual-tier system consisting of a Manifest V3 Chrome Extension frontend and a Python Flask API backend integrated with Supabase and OpenAI.

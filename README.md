@@ -300,6 +300,7 @@ Eylo-Reddit-v2/
 │       ├── chat_history_scraper.js# Reddit DM retro-synchronizer
 │       ├── inspector.js          # Post scraper & DOM extractor
 │       └── supabase_client.js    # Direct client-side Supabase SDK
+├── .agent/rules/                 # Project-specific AI governance & architecture rules
 ├── docs/                         # Project documentation and architectural slides
 │   ├── Eylo_AI_Reddit_Automation.pdf
 │   ├── Eylo_AI_Reddit_Automation.pptx
