@@ -1,24 +1,27 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
+*.class
 venv/
 env/
 .env
 .venv/
 
-# Environment Variables
+# Environment Variables & Secrets
 .env
 backend/.env
 browser_extension/.env
 browser_extension/config.js
 
-# MacOS
+# Build & Archives
+*.zip
+browser_extension.zip
+browser_extension/dist/
+
+# MacOS & Windows
 .DS_Store
+Thumbs.db
 
 # IDE
 .vscode/
 .idea/
-
-# Extension
-browser_extension/dist/
